@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <!-- Dark Obsidian-Emerald Badge Background -->
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0B2920" />
+      <stop offset="100%" stop-color="#061411" />
+    </linearGradient>
+
+    <!-- Vibrant Emerald-to-Teal Loop Gradient -->
+    <linearGradient id="emeraldGrad" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#34D399" />
+      <stop offset="100%" stop-color="#10B981" />
+    </linearGradient>
+  </defs>
+
+  <!-- Outer Rounded App Tile for Browser Tab Visibility -->
+  <rect width="64" height="64" rx="16" fill="url(#bgGrad)" />
+  <rect x="1.5" y="1.5" width="61" height="61" rx="14.5" stroke="#10B981" stroke-opacity="0.35" stroke-width="3" />
+
+  <!-- Top Circular Loop Arrow -->
+  <path d="M14 28C15.8 18.9 23.8 12 33.5 12C40.1 12 46 15.2 49.6 20.2" stroke="url(#emeraldGrad)" stroke-width="4.5" stroke-linecap="round" />
+  <path d="M51 12.5V21H42.5" stroke="url(#emeraldGrad)" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" />
+
+  <!-- Bottom Circular Loop Arrow -->
+  <path d="M50 36C48.2 45.1 40.2 52 30.5 52C23.9 52 18 48.8 14.4 43.8" stroke="url(#emeraldGrad)" stroke-width="4.5" stroke-linecap="round" />
+  <path d="M13 51.5V43H21.5" stroke="url(#emeraldGrad)" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" />
+
+  <!-- Center Organic Leaf Emblem -->
+  <path d="M23 41C23 29.5 31.5 22 42 22C42 32.5 34.5 41 23 41Z" fill="url(#emeraldGrad)" />
+  <!-- Leaf Center Vein -->
+  <path d="M23 41C28.5 35.5 33.5 31.5 38 26" stroke="#061411" stroke-width="2.5" stroke-linecap="round" />
+</svg>
