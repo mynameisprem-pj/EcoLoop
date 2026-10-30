@@ -1,0 +1,18 @@
+{
+  "short_name": "EcoLoop",
+  "name": "EcoLoop — Hyper-Local Food Rescue",
+  "description": "Offline-first surplus food routing & CO2 impact ledger for Kirtipur communities.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#061411",
+  "theme_color": "#10B981",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/ecoloop-logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
