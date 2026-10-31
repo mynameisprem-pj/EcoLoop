@@ -6,12 +6,16 @@ interface ExpiryActionBannerProps {
   expiresAt: number;
   onRescue: () => void;
   disabled?: boolean;
+  isStoreView?: boolean;
+  isOwnListing?: boolean;
 }
 
 export const ExpiryActionBanner: React.FC<ExpiryActionBannerProps> = ({
   expiresAt,
   onRescue,
   disabled = false,
+  isStoreView = false,
+  isOwnListing = false,
 }) => {
   const [now, setNow] = useState<number>(() => Date.now());
 
@@ -48,15 +52,23 @@ export const ExpiryActionBanner: React.FC<ExpiryActionBannerProps> = ({
         </span>
       </div>
 
-      {/* Circular "RESCUE" Button Overlapping the Right Edge */}
-      <button
-        type="button"
-        disabled={disabled || isExpired}
-        onClick={onRescue}
-        className="absolute right-1 w-14 h-14 rounded-full bg-[#0B1F1A] border-2 border-emerald-400/80 shadow-[0_0_15px_rgba(16,185,129,0.45)] flex items-center justify-center text-[10px] font-bold tracking-wider uppercase text-emerald-100 hover:bg-emerald-500 hover:text-slate-950 hover:scale-105 active:scale-95 transition-all duration-200 disabled:opacity-40 disabled:pointer-events-none cursor-pointer"
-      >
-        Rescue
-      </button>
+      {isStoreView || isOwnListing ? (
+        <div
+          title="Switch to Consumer Mode on another device to claim"
+          className="absolute right-1 w-14 h-14 rounded-full bg-slate-900/95 border-2 border-emerald-500/40 flex items-center justify-center text-[9px] font-bold tracking-wider uppercase text-emerald-300 text-center leading-tight px-1 select-none"
+        >
+          {isOwnListing ? 'Your Drop' : 'LIVE DROP'}
+        </div>
+      ) : (
+        <button
+          type="button"
+          disabled={disabled || isExpired}
+          onClick={onRescue}
+          className="absolute right-1 w-14 h-14 rounded-full bg-[#0B1F1A] border-2 border-emerald-400/80 shadow-[0_0_15px_rgba(16,185,129,0.45)] flex items-center justify-center text-[10px] font-bold tracking-wider uppercase text-emerald-100 hover:bg-emerald-500 hover:text-slate-950 hover:scale-105 active:scale-95 transition-all duration-200 disabled:opacity-40 disabled:pointer-events-none cursor-pointer"
+        >
+          Rescue
+        </button>
+      )}
     </div>
   );
 };
