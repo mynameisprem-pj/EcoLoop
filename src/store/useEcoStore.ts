@@ -51,6 +51,19 @@ export interface NewListingInput {
   imageUrl?: string;
 }
 
+/**
+ * Generates or retrieves a unique persistent ID for this specific phone/browser
+ */
+function getOrCreateDeviceUserId(): string {
+  const storageKey = 'ecoloop_device_user_id';
+  let existing = localStorage.getItem(storageKey);
+  if (!existing) {
+    existing = `usr-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    localStorage.setItem(storageKey, existing);
+  }
+  return existing;
+}
+
 interface EcoStoreState {
   listings: SurplusListing[];
   claims: ClaimRecord[];
@@ -64,6 +77,8 @@ interface EcoStoreState {
   locationLabel: string;
   locationError: string | null;
 
+  // Unique Device Identity & Role
+  userId: string;
   activeRole: UserRole;
   userName: string;
 
@@ -97,7 +112,10 @@ interface EcoStoreState {
   verifyPickupCode: (claimId: string, enteredCode: string) => Promise<boolean>;
   cancelClaim: (claimId: string) => Promise<void>;
 
+  // Role-Scoped Selectors
   getFilteredListings: () => SurplusListing[];
+  getMyConsumerClaims: () => ClaimRecord[];
+  getIncomingStoreClaims: () => ClaimRecord[];
 }
 
 const DEFAULT_FILTERS: FilterState = {
@@ -129,7 +147,8 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
   locationLabel: 'Detecting location...',
   locationError: null,
 
-  activeRole: 'receiver',
+  userId: getOrCreateDeviceUserId(),
+  activeRole: (localStorage.getItem('ecoloop_active_role') as UserRole) || 'receiver',
   userName: localStorage.getItem('ecoloop_user_name') || '',
 
   activeTab: 'browse',
@@ -144,7 +163,6 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
       await get().refreshData();
       await get().sweepExpiredListings();
 
-      // Subscribe to Supabase Realtime WebSocket broadcasts if configured
       if (supabase && !realtimeSubscribed) {
         realtimeSubscribed = true;
         supabase
@@ -179,23 +197,24 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
   refreshData: async () => {
     try {
       if (supabase && isCloudConfigured) {
-        const [{ data: cloudListings, error: lErr }, { data: cloudClaims, error: cErr }] =
-          await Promise.all([
-            supabase
-              .from('listings')
-              .select('*')
-              .order('created_at', { ascending: false }),
-            supabase
-              .from('claims')
-              .select('*')
-              .order('claimed_at', { ascending: false }),
-          ]);
+        const [
+          { data: cloudListings, error: lErr },
+          { data: cloudClaims, error: cErr },
+        ] = await Promise.all([
+          supabase
+            .from('listings')
+            .select('*')
+            .order('created_at', { ascending: false }),
+          supabase
+            .from('claims')
+            .select('*')
+            .order('claimed_at', { ascending: false }),
+        ]);
 
         if (!lErr && !cErr && cloudListings && cloudClaims) {
           const parsedListings = cloudListings.map(mapRowToListing);
           const parsedClaims = cloudClaims.map(mapRowToClaim);
 
-          // Mirror cloud state into local IndexedDB for offline resilience
           await db.transaction('rw', db.listings, db.claims, async () => {
             await db.listings.clear();
             await db.claims.clear();
@@ -209,7 +228,6 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
         }
       }
 
-      // Fallback to local IndexedDB if offline or cloud not yet configured
       const [localListings, localClaims] = await Promise.all([
         db.listings.orderBy('createdAt').reverse().toArray(),
         db.claims.orderBy('claimedAt').reverse().toArray(),
@@ -254,11 +272,13 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
 
   setLocationError: (err) => set({ locationError: err }),
 
-  setActiveRole: (role) =>
+  setActiveRole: (role) => {
+    localStorage.setItem('ecoloop_active_role', role);
     set({
       activeRole: role,
       activeTab: role === 'donor' ? 'post' : 'browse',
-    }),
+    });
+  },
 
   setUserName: (name) => {
     localStorage.setItem('ecoloop_user_name', name);
@@ -291,13 +311,17 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
 
   resetFilters: () => set({ filters: DEFAULT_FILTERS }),
 
+  /**
+   * Publishes a listing linked to THIS device's unique `userId` as `donorId`
+   */
   addListing: async (input: NewListingInput) => {
+    const { userId } = get();
     const now = Date.now();
     const { co2SavedKg, estimatedMeals } = calculateListingImpact(input.weightKg);
 
     const newListing: SurplusListing = {
       id: `lst-${now.toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-      donorId: `store-${input.donorName.toLowerCase().replace(/\s+/g, '-')}`,
+      donorId: userId, // <-- Tied to this Store Partner phone!
       donorName: input.donorName.trim(),
       donorType: input.donorType,
       title: input.title.trim(),
@@ -334,12 +358,21 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
     return newListing;
   },
 
+  /**
+   * Claims a listing linked to THIS consumer device's unique `userId` as `receiverId`
+   */
   claimListing: async (listingId: string, consumerName?: string) => {
+    const { userId, userName, activeRole } = get();
+
+    if (activeRole === 'donor') {
+      set({ error: 'Switch to Consumer Mode to claim surplus food.' });
+      return null;
+    }
+
     const claimant =
-      consumerName?.trim() || get().userName.trim() || 'Community Consumer';
+      consumerName?.trim() || userName.trim() || 'Community Consumer';
     const now = Date.now();
     const pickupCode = generatePickupCode();
-    const receiverId = `usr-${now.toString(36)}`;
 
     try {
       const target = get().listings.find((l) => l.id === listingId);
@@ -347,12 +380,16 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
         throw new Error('This listing has just been claimed by someone else.');
       }
 
+      if (target.donorId === userId) {
+        throw new Error('You cannot claim your own store listing.');
+      }
+
       const newClaim: ClaimRecord = {
         id: `clm-${now.toString(36)}-${Math.random().toString(36).slice(2, 5)}`,
         listingId: target.id,
         listingTitle: target.title,
         donorName: target.donorName,
-        receiverId,
+        receiverId: userId, // <-- Tied strictly to this Consumer's phone!
         receiverName: claimant,
         claimedAt: now,
         pickupCode,
@@ -363,12 +400,11 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
       };
 
       if (supabase && isCloudConfigured) {
-        // Optimistic lock: only update if status is still 'available'
         const { data: updatedRows, error: updateErr } = await supabase
           .from('listings')
           .update({
             status: 'claimed',
-            claimed_by_id: receiverId,
+            claimed_by_id: userId,
             claimed_by_name: claimant,
             claimed_at: now,
             pickup_code: pickupCode,
@@ -390,7 +426,7 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
       await db.transaction('rw', db.listings, db.claims, async () => {
         await db.listings.update(listingId, {
           status: 'claimed',
-          claimedById: receiverId,
+          claimedById: userId,
           claimedByName: claimant,
           claimedAt: now,
           pickupCode,
@@ -494,6 +530,32 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
     } catch (err) {
       console.error('[EcoLoop]: Failed to cancel claim:', err);
     }
+  },
+
+  /**
+   * Returns only claims made by THIS Consumer device
+   */
+  getMyConsumerClaims: () => {
+    const { claims, userId } = get();
+    return claims.filter((c) => c.receiverId === userId);
+  },
+
+  /**
+   * Returns only claims placed on listings owned by THIS Store Partner device
+   */
+  getIncomingStoreClaims: () => {
+    const { claims, listings, userId, userName } = get();
+    const myStoreListingIds = new Set(
+      listings
+        .filter(
+          (l) =>
+            l.donorId === userId ||
+            (userName.trim() !== '' &&
+              l.donorName.toLowerCase() === userName.trim().toLowerCase())
+        )
+        .map((l) => l.id)
+    );
+    return claims.filter((c) => myStoreListingIds.has(c.listingId));
   },
 
   getFilteredListings: () => {
