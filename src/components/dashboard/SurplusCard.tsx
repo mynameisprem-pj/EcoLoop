@@ -2,6 +2,7 @@
 import React from 'react';
 import { MapPin, Sparkles } from 'lucide-react';
 import type { SurplusListing, FoodCategory } from '../../types';
+import { useEcoStore } from '../../store/useEcoStore';
 import { ExpiryActionBanner } from '../common/ExpiryActionBanner';
 
 interface SurplusCardProps {
@@ -41,7 +42,9 @@ const CATEGORY_VISUALS: Record<
 };
 
 export const SurplusCard: React.FC<SurplusCardProps> = ({ listing, onClaim }) => {
+  const { activeRole, userId } = useEcoStore();
   const visual = CATEGORY_VISUALS[listing.category] || CATEGORY_VISUALS.produce;
+  const isOwnListing = listing.donorId === userId;
 
   const donorInitials = listing.donorName
     .split(' ')
@@ -109,6 +112,8 @@ export const SurplusCard: React.FC<SurplusCardProps> = ({ listing, onClaim }) =>
               <ExpiryActionBanner
                 expiresAt={listing.expiresAt}
                 onRescue={() => onClaim(listing.id)}
+                isStoreView={activeRole === 'donor'}
+                isOwnListing={isOwnListing}
               />
             </div>
 
