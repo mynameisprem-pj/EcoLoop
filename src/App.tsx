@@ -41,9 +41,10 @@ export function App() {
     locationLabel,
     setUserLocation,
     setLocationError,
-    claims,
     claimListing,
     getFilteredListings,
+    getMyConsumerClaims,
+    getIncomingStoreClaims,
     filters,
     setCategoryFilter,
     setSearchQuery,
@@ -118,7 +119,9 @@ export function App() {
       .sort((a, b) => (a.location.distanceKm ?? 9999) - (b.location.distanceKm ?? 9999));
   }, [rawFilteredListings, userLocation]);
 
-  const pendingClaimsCount = claims.filter(
+  const myScopedClaims =
+    activeRole === 'donor' ? getIncomingStoreClaims() : getMyConsumerClaims();
+  const pendingClaimsCount = myScopedClaims.filter(
     (c) => c.status === 'pending_pickup'
   ).length;
 
@@ -259,7 +262,8 @@ export function App() {
                   : 'text-slate-300 hover:text-white'
               }`}
             >
-              <PackageOpen className="w-3.5 h-3.5" /> My Pickups
+              <PackageOpen className="w-3.5 h-3.5" />{' '}
+              {activeRole === 'donor' ? 'Store Orders' : 'My Pickups'}
               {pendingClaimsCount > 0 && (
                 <span className="ml-1 px-1.5 py-0.2 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black">
                   {pendingClaimsCount}
@@ -279,26 +283,32 @@ export function App() {
               <BarChart3 className="w-3.5 h-3.5" /> Impact
             </button>
 
-            <button
-              type="button"
-              onClick={() => setActiveTab('post')}
-              className={`px-4 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                activeTab === 'post'
-                  ? 'bg-emerald-500 text-slate-950 shadow-md'
-                  : 'text-emerald-400 hover:bg-emerald-500/10'
-              }`}
-            >
-              <PlusCircle className="w-3.5 h-3.5" /> List Surplus Food
-            </button>
+            {activeRole === 'donor' && (
+              <button
+                type="button"
+                onClick={() => setActiveTab('post')}
+                className={`px-4 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  activeTab === 'post'
+                    ? 'bg-emerald-500 text-slate-950 shadow-md'
+                    : 'text-emerald-400 hover:bg-emerald-500/10'
+                }`}
+              >
+                <PlusCircle className="w-3.5 h-3.5" /> List Surplus Food
+              </button>
+            )}
           </nav>
 
           {/* Role Mode Switcher */}
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() =>
-                setActiveRole(activeRole === 'donor' ? 'receiver' : 'donor')
-              }
+              onClick={() => {
+                const nextRole = activeRole === 'donor' ? 'receiver' : 'donor';
+                setActiveRole(nextRole);
+                if (nextRole === 'receiver' && activeTab === 'post') {
+                  setActiveTab('browse');
+                }
+              }}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-400/40 text-xs font-bold text-emerald-300 transition-all cursor-pointer"
             >
               {activeRole === 'donor' ? (
@@ -403,13 +413,15 @@ export function App() {
                     <p className="text-xs text-slate-400 max-w-md mx-auto">
                       Local bakeries, grocery stores, and restaurants can publish unsold surplus inventory in real time.
                     </p>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab('post')}
-                      className="mt-2 inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-emerald-500 text-slate-950 text-xs font-extrabold uppercase tracking-wider cursor-pointer"
-                    >
-                      <PlusCircle className="w-4 h-4" /> Publish First Listing
-                    </button>
+                    {activeRole === 'donor' && (
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('post')}
+                        className="mt-2 inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-emerald-500 text-slate-950 text-xs font-extrabold uppercase tracking-wider cursor-pointer"
+                      >
+                        <PlusCircle className="w-4 h-4" /> Publish First Listing
+                      </button>
+                    )}
                   </div>
                 ) : (
                   liveListings.map((listing) => (
@@ -505,7 +517,9 @@ export function App() {
               </span>
             )}
           </div>
-          <span className="text-[10px] font-medium mt-1">Pickups</span>
+          <span className="text-[10px] font-medium mt-1">
+            {activeRole === 'donor' ? 'Store Orders' : 'My Pickups'}
+          </span>
         </button>
 
         <button
@@ -519,16 +533,18 @@ export function App() {
           <span className="text-[10px] font-medium mt-1">Impact</span>
         </button>
 
-        <button
-          type="button"
-          onClick={() => setActiveTab('post')}
-          className={`flex flex-col items-center justify-center w-14 h-full cursor-pointer ${
-            activeTab === 'post' ? 'text-emerald-400' : 'text-slate-400'
-          }`}
-        >
-          <PlusCircle className="w-5 h-5" />
-          <span className="text-[10px] font-medium mt-1">Publish</span>
-        </button>
+        {activeRole === 'donor' && (
+          <button
+            type="button"
+            onClick={() => setActiveTab('post')}
+            className={`flex flex-col items-center justify-center w-14 h-full cursor-pointer ${
+              activeTab === 'post' ? 'text-emerald-400' : 'text-slate-400'
+            }`}
+          >
+            <PlusCircle className="w-5 h-5" />
+            <span className="text-[10px] font-medium mt-1">Publish</span>
+          </button>
+        )}
       </nav>
 
       <QrHandoffModal />

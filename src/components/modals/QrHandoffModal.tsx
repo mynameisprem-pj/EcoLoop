@@ -12,20 +12,24 @@ import {
   KeyRound,
   AlertCircle,
   Camera,
-  QrCode,
 } from 'lucide-react';
 import { useEcoStore } from '../../store/useEcoStore';
 
 export const QrHandoffModal: React.FC = () => {
-  const { selectedClaimForModal, setSelectedClaimForModal, verifyPickupCode } =
-    useEcoStore();
+  const {
+    activeRole,
+    selectedClaimForModal,
+    setSelectedClaimForModal,
+    verifyPickupCode,
+  } = useEcoStore();
 
   const [enteredCode, setEnteredCode] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isCameraActive, setIsCameraActive] = useState(false);
   const scannerRef = useRef<Html5Qrcode | null>(null);
 
-  // Clean up hardware camera stream when modal closes or switches mode
+  const isStorePartner = activeRole === 'donor';
+
   useEffect(() => {
     return () => {
       stopCameraScanner();
@@ -40,7 +44,7 @@ export const QrHandoffModal: React.FC = () => {
         }
         scannerRef.current.clear();
       } catch {
-        // Ignore cleanup errors on unmount
+        // Ignore cleanup errors
       }
       scannerRef.current = null;
     }
@@ -61,7 +65,6 @@ export const QrHandoffModal: React.FC = () => {
           { facingMode: 'environment' },
           { fps: 10, qrbox: { width: 200, height: 200 } },
           async (decodedText) => {
-            // Expected payload format: ECOLOOP|<claimId>|<pickupCode> or raw pickupCode
             const parts = decodedText.split('|');
             const extractedCode =
               parts.length === 3 ? parts[2] : decodedText.trim();
@@ -73,19 +76,17 @@ export const QrHandoffModal: React.FC = () => {
             if (ok) {
               await stopCameraScanner();
             } else {
-              setErrorMsg('Scanned QR does not match this pickup pass.');
+              setErrorMsg('Scanned QR does not match this reservation.');
             }
           },
-          () => {
-            // Frame scan in progress
-          }
+          () => {}
         );
       } catch (err) {
         setIsCameraActive(false);
         setErrorMsg(
           err instanceof Error
             ? err.message
-            : 'Camera access denied or unavailable on this device.'
+            : 'Camera access denied or unavailable.'
         );
       }
     }, 150);
@@ -104,7 +105,7 @@ export const QrHandoffModal: React.FC = () => {
       enteredCode
     );
     if (!success) {
-      setErrorMsg('Verification code does not match. Please check the code.');
+      setErrorMsg('Invalid code. Ask the customer for the ECO-XXX code on their phone.');
     } else {
       setEnteredCode('');
     }
@@ -132,36 +133,25 @@ export const QrHandoffModal: React.FC = () => {
         <div className="pr-8">
           <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-emerald-400">
             <ShieldCheck className="w-4 h-4" />
-            {isVerified ? 'Verified Pickup Receipt' : 'Live QR Pickup Pass'}
+            {isVerified
+              ? 'Verified Pickup Receipt'
+              : isStorePartner
+              ? 'Store Handoff Verification'
+              : 'Your Consumer Pickup Ticket'}
           </span>
           <h3 className="text-lg font-extrabold text-white mt-0.5 leading-snug">
             {selectedClaimForModal.listingTitle}
           </h3>
           <p className="text-xs text-slate-400">
-            Store:{' '}
-            <span className="text-emerald-300">
-              {selectedClaimForModal.donorName}
-            </span>
+            {isStorePartner
+              ? `Customer: ${selectedClaimForModal.receiverName}`
+              : `Pickup at: ${selectedClaimForModal.donorName}`}
           </p>
         </div>
 
-        {/* Center Display: Either Scannable ISO QR Code OR Live Hardware Camera */}
-        <div className="my-4 flex flex-col items-center">
-          {isCameraActive && !isVerified ? (
-            <div className="w-full space-y-2">
-              <div
-                id="ecoloop-qr-reader"
-                className="w-full rounded-2xl overflow-hidden border-2 border-emerald-400 bg-black min-h-[220px]"
-              />
-              <button
-                type="button"
-                onClick={stopCameraScanner}
-                className="w-full py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold text-slate-200 flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                <QrCode className="w-3.5 h-3.5" /> Switch Back to QR Pass
-              </button>
-            </div>
-          ) : (
+        {/* CONSUMER VIEW: Shows their secret QR Code and ECO-XXX Pass to hold up */}
+        {(!isStorePartner || isVerified) && (
+          <div className="my-5 flex flex-col items-center">
             <div className="relative p-4 rounded-2xl bg-white text-slate-950 shadow-[0_0_30px_rgba(16,185,129,0.25)]">
               <div
                 className={`transition-all duration-500 ${
@@ -170,7 +160,7 @@ export const QrHandoffModal: React.FC = () => {
               >
                 <QRCodeSVG
                   value={qrPayload}
-                  size={160}
+                  size={168}
                   bgColor="#FFFFFF"
                   fgColor="#06241C"
                   level="M"
@@ -184,25 +174,86 @@ export const QrHandoffModal: React.FC = () => {
                     Pickup Confirmed
                   </span>
                   <span className="text-[11px] text-emerald-200 mt-0.5">
-                    Verified & Logged
+                    Verified by Store
                   </span>
                 </div>
               )}
             </div>
-          )}
 
-          <div className="mt-3 text-center">
-            <span className="text-[10px] uppercase tracking-widest text-slate-400 block">
-              Backup Verification Code
-            </span>
-            <span className="mt-1 inline-block font-mono text-xl font-black tracking-widest text-emerald-300 bg-emerald-950/80 border border-emerald-500/40 px-4 py-1 rounded-xl">
-              {selectedClaimForModal.pickupCode}
-            </span>
+            <div className="mt-3 text-center">
+              <span className="text-[10px] uppercase tracking-widest text-slate-400 block">
+                Show this code to store staff
+              </span>
+              <span className="mt-1 inline-block font-mono text-xl font-black tracking-widest text-emerald-300 bg-emerald-950/80 border border-emerald-500/40 px-4 py-1 rounded-xl">
+                {selectedClaimForModal.pickupCode}
+              </span>
+            </div>
           </div>
-        </div>
+        )}
 
-        {/* Impact Summary */}
-        <div className="grid grid-cols-3 gap-2 p-2.5 rounded-2xl bg-black/40 border border-white/10 text-center mb-4">
+        {/* STORE PARTNER VIEW: Shows Camera Scanner & Code Verification Input */}
+        {isStorePartner && !isVerified && (
+          <div className="my-4 space-y-3">
+            {isCameraActive ? (
+              <div className="space-y-2">
+                <div
+                  id="ecoloop-qr-reader"
+                  className="w-full rounded-2xl overflow-hidden border-2 border-emerald-400 bg-black min-h-[220px]"
+                />
+                <button
+                  type="button"
+                  onClick={stopCameraScanner}
+                  className="w-full py-2 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold text-slate-200 cursor-pointer"
+                >
+                  Close Camera
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={startCameraScanner}
+                className="w-full py-3.5 px-4 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(16,185,129,0.4)] transition-all cursor-pointer"
+              >
+                <Camera className="w-4 h-4" />
+                Open Camera to Scan Customer QR
+              </button>
+            )}
+
+            <div className="pt-2 border-t border-white/10">
+              <label className="block text-[11px] text-slate-400 mb-1.5 text-center">
+                Or enter the 6-character code from the customer's phone:
+              </label>
+              <form onSubmit={handleManualVerify} className="flex gap-2">
+                <div className="relative flex-1">
+                  <KeyRound className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. ECO-7K9"
+                    value={enteredCode}
+                    onChange={(e) => setEnteredCode(e.target.value)}
+                    className="w-full rounded-xl bg-black/50 border border-white/15 pl-8 pr-3 py-2.5 text-xs font-mono uppercase text-white placeholder-slate-500 focus:border-emerald-400 focus:outline-none"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="px-4 py-2.5 rounded-xl bg-emerald-500/25 hover:bg-emerald-500/40 border border-emerald-400/50 text-emerald-200 text-xs font-extrabold uppercase tracking-wider transition-colors cursor-pointer"
+                >
+                  Verify
+                </button>
+              </form>
+            </div>
+
+            {errorMsg && (
+              <p className="text-[11px] text-rose-400 flex items-center gap-1">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" /> {errorMsg}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Impact Strip */}
+        <div className="grid grid-cols-3 gap-2 p-2.5 rounded-2xl bg-black/40 border border-white/10 text-center mb-3">
           <div className="p-1.5">
             <Scale className="w-4 h-4 text-emerald-400 mx-auto mb-0.5" />
             <p className="text-xs font-extrabold text-white">
@@ -226,55 +277,13 @@ export const QrHandoffModal: React.FC = () => {
           </div>
         </div>
 
-        {/* Store Verification Controls */}
-        {!isVerified ? (
-          <div className="space-y-2.5 pt-3 border-t border-white/10">
-            {!isCameraActive && (
-              <button
-                type="button"
-                onClick={startCameraScanner}
-                className="w-full py-2.5 px-4 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/50 text-emerald-200 font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-colors cursor-pointer"
-              >
-                <Camera className="w-4 h-4 text-emerald-400" />
-                Store Staff: Scan QR with Camera
-              </button>
-            )}
-
-            <form onSubmit={handleManualVerify} className="flex gap-2">
-              <div className="relative flex-1">
-                <KeyRound className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  required
-                  placeholder="Or type ECO-XXX code"
-                  value={enteredCode}
-                  onChange={(e) => setEnteredCode(e.target.value)}
-                  className="w-full rounded-xl bg-black/50 border border-white/15 pl-8 pr-3 py-2 text-xs font-mono uppercase text-white placeholder-slate-500 focus:border-emerald-400 focus:outline-none"
-                />
-              </div>
-              <button
-                type="submit"
-                className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-extrabold uppercase tracking-wider transition-colors cursor-pointer"
-              >
-                Verify
-              </button>
-            </form>
-
-            {errorMsg && (
-              <p className="text-[11px] text-rose-400 flex items-center gap-1">
-                <AlertCircle className="w-3.5 h-3.5 shrink-0" /> {errorMsg}
-              </p>
-            )}
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={handleClose}
-            className="w-full py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-bold uppercase tracking-wider text-white transition-colors cursor-pointer"
-          >
-            Close Receipt
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={handleClose}
+          className="w-full py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-bold uppercase tracking-wider text-white transition-colors cursor-pointer"
+        >
+          {isVerified ? 'Close Receipt' : 'Done'}
+        </button>
       </div>
     </div>
   );
