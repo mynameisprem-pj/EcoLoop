@@ -1,6 +1,14 @@
 // src/components/dashboard/SurplusCard.tsx
-import React from 'react';
-import { Navigation, Sparkles, Check, ExternalLink } from 'lucide-react';
+import React, { useState } from 'react';
+import {
+  Navigation,
+  Sparkles,
+  Check,
+  ExternalLink,
+  BadgeCheck,
+  Trash2,
+  Flag,
+} from 'lucide-react';
 import type { SurplusListing, FoodCategory } from '../../types';
 import { ExpiryActionBanner } from '../common/ExpiryActionBanner';
 import { useEcoStore } from '../../store/useEcoStore';
@@ -47,17 +55,36 @@ export const SurplusCard: React.FC<SurplusCardProps> = ({
   onClaim,
   onTrackOnMap,
 }) => {
-  const { activeRole, userId } = useEcoStore();
+  const { activeRole, userId, listings, deleteOrReportListing } = useEcoStore();
+  const [confirmAction, setConfirmAction] = useState<'delete' | 'report' | null>(
+    null
+  );
+
   const visual = CATEGORY_VISUALS[listing.category] || CATEGORY_VISUALS.produce;
   const isOwnListing = listing.donorId === userId;
   const isConsumer = activeRole === 'receiver' && !isOwnListing;
 
-  // Format distance cleanly (meters if under 1 km, otherwise km)
+  // A store earns the Verified Badge if it has completed at least 1 QR-verified rescue
+  // OR if the listing includes a live food photo and valid GPS coordinates
+  const hasCompletedRescues = listings.some(
+    (l) =>
+      l.status === 'completed' &&
+      (l.donorId === listing.donorId ||
+        l.donorName.toLowerCase() === listing.donorName.toLowerCase())
+  );
+  const isVerifiedStore =
+    hasCompletedRescues || Boolean(listing.imageUrl && listing.location.lat !== 0);
+
   const formatDistance = (km?: number) => {
     if (km === undefined || Number.isNaN(km)) return 'Track Route';
     if (km < 0.05) return 'Nearby (<50m)';
     if (km < 1) return `${Math.round(km * 1000)} m away`;
     return `${km.toFixed(1)} km away`;
+  };
+
+  const handleConfirmRemoval = async () => {
+    await deleteOrReportListing(listing.id);
+    setConfirmAction(null);
   };
 
   return (
@@ -87,9 +114,33 @@ export const SurplusCard: React.FC<SurplusCardProps> = ({
             <h3 className="text-sm sm:text-base font-bold text-white leading-snug truncate">
               {listing.title}
             </h3>
-            <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-md bg-white/5 text-slate-300 border border-white/10 shrink-0">
-              {listing.storageRequirement}
-            </span>
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-md bg-white/5 text-slate-300 border border-white/10">
+                {listing.storageRequirement}
+              </span>
+
+              {/* Store Owner Delete Button OR Consumer Report Fake Button */}
+              {isOwnListing ? (
+                <button
+                  type="button"
+                  onClick={() => setConfirmAction('delete')}
+                  title="Delete your store listing"
+                  className="p-1 rounded-lg bg-white/5 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition-colors cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirmAction('report')}
+                  title="Report fake or unavailable listing"
+                  className="p-1 rounded-lg bg-white/5 hover:bg-amber-500/20 text-slate-400 hover:text-amber-300 transition-colors cursor-pointer"
+                >
+                  <Flag className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
           </div>
 
           <p className="text-xs text-slate-300/90 line-clamp-1 mt-0.5">
@@ -97,8 +148,16 @@ export const SurplusCard: React.FC<SurplusCardProps> = ({
           </p>
 
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs mt-1.5">
-            <span className="font-semibold text-emerald-300">
+            <span className="font-semibold text-emerald-300 inline-flex items-center gap-1">
               {listing.donorName}
+              {isVerifiedStore && (
+                <span
+                  title="Verified Store Partner (GPS & Photo/History Verified)"
+                  className="inline-flex items-center text-emerald-400"
+                >
+                  <BadgeCheck className="w-3.5 h-3.5 fill-emerald-500/20" />
+                </span>
+              )}
             </span>
             <span className="text-slate-500">•</span>
             <span className="text-slate-300 text-[11px]">
@@ -112,12 +171,38 @@ export const SurplusCard: React.FC<SurplusCardProps> = ({
         </div>
       </div>
 
+      {/* Inline Confirmation Bar when Delete or Report Fake is clicked */}
+      {confirmAction && (
+        <div className="mt-3 p-2.5 rounded-xl bg-rose-950/60 border border-rose-500/40 flex items-center justify-between gap-2 text-xs">
+          <span className="text-rose-200 font-medium">
+            {confirmAction === 'delete'
+              ? 'Remove this listing from the marketplace?'
+              : 'Report & remove this listing as fake or unavailable?'}
+          </span>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => setConfirmAction(null)}
+              className="px-2.5 py-1 rounded-lg bg-white/10 text-slate-200 hover:bg-white/15 font-semibold cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirmRemoval}
+              className="px-2.5 py-1 rounded-lg bg-rose-500 hover:bg-rose-400 text-slate-950 font-extrabold cursor-pointer"
+            >
+              {confirmAction === 'delete' ? 'Delete' : 'Confirm Report'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Bottom Action Row: Timer + Clickable Distance Map Tracker + Claim Button */}
       <div className="mt-3 pt-2.5 border-t border-white/10 flex flex-wrap items-center justify-between gap-2">
         <ExpiryActionBanner expiresAt={listing.expiresAt} />
 
         <div className="flex items-center gap-2 ml-auto">
-          {/* Clickable Distance Pill -> Opens Map & Tracks Human-to-Store Route */}
           <button
             type="button"
             onClick={() => onTrackOnMap(listing)}
@@ -129,7 +214,6 @@ export const SurplusCard: React.FC<SurplusCardProps> = ({
             <ExternalLink className="w-3 h-3 opacity-70" />
           </button>
 
-          {/* Clean Non-Overlapping Claim Button (Only for Consumers) */}
           {isConsumer && (
             <button
               type="button"
