@@ -111,6 +111,7 @@ interface EcoStoreState {
   ) => Promise<ClaimRecord | null>;
   verifyPickupCode: (claimId: string, enteredCode: string) => Promise<boolean>;
   cancelClaim: (claimId: string) => Promise<void>;
+  deleteOrReportListing: (listingId: string) => Promise<void>;
 
   // Role-Scoped Selectors
   getFilteredListings: () => SurplusListing[];
@@ -529,6 +530,18 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
       set({ selectedClaimForModal: null });
     } catch (err) {
       console.error('[EcoLoop]: Failed to cancel claim:', err);
+    }
+  },
+
+  deleteOrReportListing: async (listingId: string) => {
+    try {
+      if (supabase && isCloudConfigured) {
+        await supabase.from('listings').delete().eq('id', listingId);
+      }
+      await db.listings.delete(listingId);
+      await get().refreshData();
+    } catch (err) {
+      console.error('[EcoLoop]: Failed to remove listing:', err);
     }
   },
 
