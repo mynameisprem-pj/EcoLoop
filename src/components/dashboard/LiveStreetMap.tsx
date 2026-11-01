@@ -1,50 +1,15 @@
 // src/components/dashboard/LiveStreetMap.tsx
-import React, { useEffect } from 'react';
-import {
-  MapContainer,
-  TileLayer,
-  Marker,
-  Popup,
-  Polyline,
-  useMap,
-} from 'react-leaflet';
-import L from 'leaflet';
+import React, { useState, useEffect } from 'react';
 import type { SurplusListing } from '../../types';
-import { type Coordinates, calculateDistanceKm } from '../../utils/geoUtils';
-import { Navigation, Clock, ExternalLink, X } from 'lucide-react';
-import { getExpiryTimeRemaining } from '../../utils/impactCalculator';
-
-const storePinIcon = new L.DivIcon({
-  className: 'custom-eco-pin',
-  html: `<div style="
-    width: 32px;
-    height: 32px;
-    background: #10B981;
-    border: 3px solid #061411;
-    border-radius: 50%;
-    box-shadow: 0 0 16px rgba(16,185,129,0.9);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 15px;
-  ">🏪</div>`,
-  iconSize: [32, 32],
-  iconAnchor: [16, 16],
-});
-
-const userGpsIcon = new L.DivIcon({
-  className: 'custom-user-pin',
-  html: `<div style="
-    width: 22px;
-    height: 22px;
-    background: #38BDF8;
-    border: 3px solid #FFFFFF;
-    border-radius: 50%;
-    box-shadow: 0 0 16px #38BDF8;
-  "></div>`,
-  iconSize: [22, 22],
-  iconAnchor: [11, 11],
-});
+import { type Coordinates, calculateDistanceKm, isValidCoordinate } from '../../utils/geoUtils';
+import {
+  Navigation,
+  ExternalLink,
+  MapPin,
+  Check,
+  Compass,
+  Layers,
+} from 'lucide-react';
 
 interface LiveStreetMapProps {
   listings: SurplusListing[];
@@ -55,196 +20,176 @@ interface LiveStreetMapProps {
   isVisible?: boolean;
 }
 
-/**
- * Fixes the black/half-loaded Leaflet tile bug on mobile tabs
- * and automatically zooms to fit both Human Location and Store Location when tracking.
- */
-const MapController: React.FC<{
-  center: Coordinates;
-  trackedListing: SurplusListing | null;
-  isVisible: boolean;
-}> = ({ center, trackedListing, isVisible }) => {
-  const map = useMap();
-
-  useEffect(() => {
-    // Force Leaflet to recalculate its container size when tab becomes visible
-    const timer = setTimeout(() => {
-      map.invalidateSize();
-      if (trackedListing) {
-        const bounds = L.latLngBounds(
-          [center.lat, center.lng],
-          [trackedListing.location.lat, trackedListing.location.lng]
-        );
-        map.fitBounds(bounds, { padding: [55, 55], maxZoom: 16 });
-      } else {
-        map.setView([center.lat, center.lng], 14);
-      }
-    }, 120);
-
-    return () => clearTimeout(timer);
-  }, [center, trackedListing, isVisible, map]);
-
-  return null;
-};
-
 export const LiveStreetMap: React.FC<LiveStreetMapProps> = ({
   listings,
   userLocation,
   trackedListing,
-  onClearTracking,
   onClaim,
-  isVisible = true,
 }) => {
-  const trackedDistanceKm = trackedListing
-    ? calculateDistanceKm(userLocation, {
-        lat: trackedListing.location.lat,
-        lng: trackedListing.location.lng,
-      })
-    : null;
+  const [selectedListing, setSelectedListing] = useState<SurplusListing | null>(
+    trackedListing || listings[0] || null
+  );
+  const [mapType, setMapType] = useState<'m' | 'k'>('m'); // 'm' = Road Map, 'k' = Satellite
+
+  // Whenever user clicks the distance button on a card, lock the Google Map onto that store
+  useEffect(() => {
+    if (trackedListing) {
+      setSelectedListing(trackedListing);
+    } else if (!selectedListing && listings.length > 0) {
+      setSelectedListing(listings[0]);
+    }
+  }, [trackedListing, listings]);
+
+  const activeTarget = selectedListing || trackedListing;
+
+  // Determine exact coordinates for the live Google Map
+  const targetLat =
+    activeTarget && isValidCoordinate(activeTarget.location)
+      ? activeTarget.location.lat
+      : isValidCoordinate(userLocation)
+      ? userLocation.lat
+      : 27.0815;
+
+  const targetLng =
+    activeTarget && isValidCoordinate(activeTarget.location)
+      ? activeTarget.location.lng
+      : isValidCoordinate(userLocation)
+      ? userLocation.lng
+      : 85.5594;
+
+  const distanceKm =
+    activeTarget && isValidCoordinate(userLocation)
+      ? calculateDistanceKm(userLocation, activeTarget.location)
+      : undefined;
+
+  const formatDist = (km?: number) => {
+    if (km === undefined) return 'Same Area';
+    if (km < 0.05) return 'Right Here (<50m)';
+    if (km < 1) return `${Math.round(km * 1000)} m away`;
+    return `${km.toFixed(1)} km away`;
+  };
+
+  // Live Google Maps Embed URL centered on the store/user with a pin
+  const googleEmbedUrl = `https://maps.google.com/maps?q=${targetLat},${targetLng}&t=${mapType}&z=16&ie=UTF8&iwloc=&output=embed`;
+
+  // Live Google Maps Turn-by-Turn Route URL (from Human Location -> Store Location)
+  const googleDirectionsUrl = isValidCoordinate(userLocation)
+    ? `https://www.google.com/maps/dir/?api=1&origin=${userLocation.lat},${userLocation.lng}&destination=${targetLat},${targetLng}&travelmode=walking`
+    : `https://www.google.com/maps/search/?api=1&query=${targetLat},${targetLng}`;
 
   return (
-    <div className="relative w-full h-[440px] lg:h-[600px] rounded-2xl overflow-hidden border border-emerald-500/35 bg-[#0b1614] shadow-[0_0_30px_rgba(16,185,129,0.12)] z-0">
-      <MapContainer
-        center={[userLocation.lat, userLocation.lng]}
-        zoom={14}
-        scrollWheelZoom={true}
-        style={{ height: '100%', width: '100%' }}
-        className="z-0"
-      >
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          className="ecoloop-dark-tiles"
-        />
-
-        <MapController
-          center={userLocation}
-          trackedListing={trackedListing}
-          isVisible={isVisible}
-        />
-
-        {/* Human Location Marker (Blue Pulse Dot) */}
-        <Marker position={[userLocation.lat, userLocation.lng]} icon={userGpsIcon}>
-          <Popup>
-            <div className="text-slate-900 font-bold text-xs">
-              🚶 Your Live Location
-            </div>
-          </Popup>
-        </Marker>
-
-        {/* Live Route Tracking Line Between Human and Selected Store */}
-        {trackedListing && (
-          <Polyline
-            positions={[
-              [userLocation.lat, userLocation.lng],
-              [trackedListing.location.lat, trackedListing.location.lng],
-            ]}
-            pathOptions={{
-              color: '#10B981',
-              weight: 4,
-              dashArray: '8, 8',
-              opacity: 0.95,
-            }}
-          />
-        )}
-
-        {/* Store Pins */}
-        {listings.map((item) => {
-          const distKm = calculateDistanceKm(userLocation, {
-            lat: item.location.lat,
-            lng: item.location.lng,
-          });
-          const remaining = getExpiryTimeRemaining(item.expiresAt);
-          const googleMapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${userLocation.lat},${userLocation.lng}&destination=${item.location.lat},${item.location.lng}&travelmode=walking`;
-
-          return (
-            <Marker
-              key={item.id}
-              position={[item.location.lat, item.location.lng]}
-              icon={storePinIcon}
-            >
-              <Popup>
-                <div className="min-w-[210px] text-slate-900 space-y-1.5 p-0.5">
-                  <div className="text-[11px] font-bold text-emerald-700 uppercase">
-                    {item.donorName} • {distKm} km
-                  </div>
-                  <div className="text-sm font-extrabold leading-tight">
-                    {item.title}
-                  </div>
-                  <div className="text-xs text-slate-600">
-                    📍 {item.location.address}, {item.location.neighborhood}
-                  </div>
-                  <div className="flex items-center justify-between text-xs font-semibold text-amber-700 pt-1">
-                    <span className="flex items-center gap-1">
-                      <Clock className="w-3.5 h-3.5" /> {remaining.formatted}
-                    </span>
-                    <span>{item.weightKg} kg</span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-1.5 pt-1.5">
-                    <a
-                      href={googleMapsUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="py-1.5 px-2 rounded-lg bg-slate-900 text-white font-bold text-[11px] flex items-center justify-center gap-1 no-underline"
-                    >
-                      Navigate <ExternalLink className="w-3 h-3" />
-                    </a>
-                    <button
-                      type="button"
-                      onClick={() => onClaim(item.id)}
-                      className="py-1.5 px-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] cursor-pointer"
-                    >
-                      Claim Drop
-                    </button>
-                  </div>
-                </div>
-              </Popup>
-            </Marker>
-          );
-        })}
-      </MapContainer>
-
-      {/* Active Route Tracking Overlay Card */}
-      {trackedListing ? (
-        <div className="absolute top-3 inset-x-3 z-[400] rounded-2xl bg-slate-950/95 backdrop-blur-md border border-emerald-400/50 p-3 shadow-2xl flex items-center justify-between gap-3">
+    <div className="rounded-2xl overflow-hidden border border-emerald-500/35 bg-[#0D1815] shadow-[0_0_30px_rgba(16,185,129,0.14)] flex flex-col">
+      {/* Top Map Header Bar */}
+      <div className="p-3 bg-[#101E1A] border-b border-white/10 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-7 h-7 rounded-lg bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center shrink-0">
+            <Compass className="w-4 h-4 text-emerald-400" />
+          </div>
           <div className="min-w-0">
-            <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-400 uppercase">
-              <Navigation className="w-3.5 h-3.5 animate-pulse" />
-              <span>Tracking Route • {trackedDistanceKm} km away</span>
-            </div>
-            <p className="text-xs font-bold text-white truncate mt-0.5">
-              {trackedListing.donorName} ({trackedListing.location.neighborhood})
+            <h3 className="text-xs font-extrabold text-white truncate">
+              {activeTarget
+                ? `${activeTarget.donorName} (${activeTarget.location.neighborhood})`
+                : 'Live Google Map — Your Location'}
+            </h3>
+            <p className="text-[11px] text-emerald-300 font-medium truncate">
+              {activeTarget
+                ? `📍 ${activeTarget.location.address} • ${formatDist(distanceKm)}`
+                : `GPS: ${targetLat.toFixed(4)}, ${targetLng.toFixed(4)}`}
             </p>
           </div>
-
-          <div className="flex items-center gap-1.5 shrink-0">
-            <a
-              href={`https://www.google.com/maps/dir/?api=1&origin=${userLocation.lat},${userLocation.lng}&destination=${trackedListing.location.lat},${trackedListing.location.lng}&travelmode=walking`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-2.5 py-1.5 rounded-xl bg-emerald-500 text-slate-950 font-extrabold text-[11px] flex items-center gap-1"
-            >
-              Directions <ExternalLink className="w-3 h-3" />
-            </a>
-            {onClearTracking && (
-              <button
-                type="button"
-                onClick={onClearTracking}
-                className="p-1.5 rounded-xl bg-white/10 text-slate-300 hover:text-white cursor-pointer"
-                title="Clear route tracking"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            )}
-          </div>
         </div>
-      ) : (
-        <div className="absolute top-3 right-3 z-[400] bg-slate-950/90 backdrop-blur-md border border-emerald-500/40 px-3 py-1.5 rounded-full flex items-center gap-1.5 text-xs font-semibold text-emerald-300 shadow-lg">
-          <span className="w-2 h-2 rounded-full bg-sky-400 animate-ping" />
-          <span>You (Blue) • Stores ({listings.length})</span>
+
+        {/* Toggle Road Map vs Satellite View */}
+        <button
+          type="button"
+          onClick={() => setMapType((prev) => (prev === 'm' ? 'k' : 'm'))}
+          className="px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-[11px] font-bold text-slate-200 flex items-center gap-1 shrink-0 cursor-pointer"
+        >
+          <Layers className="w-3.5 h-3.5 text-emerald-400" />
+          {mapType === 'm' ? 'Satellite' : 'Map'}
+        </button>
+      </div>
+
+      {/* Store Selector Pills (When multiple listings exist, tap any store to jump on Google Map) */}
+      {listings.length > 0 && (
+        <div className="px-3 py-2 bg-black/40 border-b border-white/10 flex items-center gap-1.5 overflow-x-auto">
+          {listings.map((item) => {
+            const isSelected = activeTarget?.id === item.id;
+            const d = calculateDistanceKm(userLocation, item.location);
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setSelectedListing(item)}
+                className={`px-2.5 py-1 rounded-xl text-xs font-semibold shrink-0 flex items-center gap-1.5 border transition-all cursor-pointer ${
+                  isSelected
+                    ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-bold shadow-sm'
+                    : 'bg-white/5 text-slate-300 border-white/10 hover:bg-white/10'
+                }`}
+              >
+                <MapPin className="w-3 h-3 shrink-0" />
+                <span className="truncate max-w-[120px]">{item.donorName}</span>
+                {d !== undefined && (
+                  <span className="opacity-80 text-[10px]">
+                    ({d < 1 ? `${Math.round(d * 1000)}m` : `${d.toFixed(1)}km`})
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
       )}
+
+      {/* Embedded Live Google Map Frame */}
+      <div className="relative w-full h-[360px] lg:h-[460px] bg-slate-900">
+        <iframe
+          key={`${targetLat}-${targetLng}-${mapType}`}
+          title="EcoLoop Live Google Map"
+          src={googleEmbedUrl}
+          className="w-full h-full border-0"
+          allowFullScreen
+          loading="lazy"
+          referrerPolicy="no-referrer-when-downgrade"
+        />
+      </div>
+
+      {/* Bottom Live Route Tracking & Action Bar */}
+      <div className="p-3 bg-[#101E1A] border-t border-white/10 flex flex-wrap items-center justify-between gap-2">
+        <div className="text-xs text-slate-300">
+          <span className="font-semibold text-white">
+            {activeTarget ? activeTarget.title : 'Live GPS Pin'}
+          </span>
+          {activeTarget && (
+            <span className="text-emerald-400 font-bold ml-2">
+              • {formatDist(distanceKm)}
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 ml-auto">
+          <a
+            href={googleDirectionsUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-xs font-bold text-white transition-colors no-underline"
+          >
+            <Navigation className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Live Walking Route</span>
+            <ExternalLink className="w-3 h-3 opacity-75" />
+          </a>
+
+          {activeTarget && (
+            <button
+              type="button"
+              onClick={() => onClaim(activeTarget.id)}
+              className="inline-flex items-center gap-1 px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs uppercase tracking-wider cursor-pointer"
+            >
+              <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+              Claim
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 };

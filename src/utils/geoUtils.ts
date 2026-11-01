@@ -11,10 +11,30 @@ export interface ResolvedLocation extends Coordinates {
 }
 
 /**
- * Calculates the real-world distance in kilometers between two GPS coordinates
- * using the spherical Haversine formula.
+ * Checks if coordinates are valid real-world numbers and not (0,0)
  */
-export function calculateDistanceKm(coord1: Coordinates, coord2: Coordinates): number {
+export function isValidCoordinate(coord?: Coordinates | null): coord is Coordinates {
+  if (!coord) return false;
+  const { lat, lng } = coord;
+  if (typeof lat !== 'number' || typeof lng !== 'number') return false;
+  if (Number.isNaN(lat) || Number.isNaN(lng)) return false;
+  if (Math.abs(lat) < 0.001 && Math.abs(lng) < 0.001) return false; // Reject (0,0)
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return false;
+  return true;
+}
+
+/**
+ * Calculates the real-world distance in kilometers between two GPS coordinates
+ * using the spherical Haversine formula. Returns undefined if either coordinate is invalid.
+ */
+export function calculateDistanceKm(
+  coord1?: Coordinates | null,
+  coord2?: Coordinates | null
+): number | undefined {
+  if (!isValidCoordinate(coord1) || !isValidCoordinate(coord2)) {
+    return undefined;
+  }
+
   const R = 6371; // Earth's mean radius in km
   const dLat = toRad(coord2.lat - coord1.lat);
   const dLng = toRad(coord2.lng - coord1.lng);
@@ -22,7 +42,7 @@ export function calculateDistanceKm(coord1: Coordinates, coord2: Coordinates): n
   const a =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
     Math.cos(toRad(coord1.lat)) *
-      Math.cos(toRad(coord2.lat)) +
+      Math.cos(toRad(coord2.lat)) *
       Math.sin(dLng / 2) *
       Math.sin(dLng / 2);
 
@@ -36,7 +56,8 @@ function toRad(deg: number): number {
 
 /**
  * Requests live GPS coordinates from the browser.
- * Rejects cleanly if the user denies permission or GPS is unavailable.
+ * If high-accuracy GPS times out (common on Windows/Mac laptops without GPS chips),
+ * automatically retries with Wi-Fi/network triangulation.
  */
 export function requestBrowserGps(): Promise<Coordinates> {
   return new Promise((resolve, reject) => {
@@ -45,6 +66,7 @@ export function requestBrowserGps(): Promise<Coordinates> {
       return;
     }
 
+    // First attempt: High accuracy (best for phones)
     navigator.geolocation.getCurrentPosition(
       (position) => {
         resolve({
@@ -52,17 +74,28 @@ export function requestBrowserGps(): Promise<Coordinates> {
           lng: position.coords.longitude,
         });
       },
-      (err) => {
-        reject(new Error(err.message || 'Location permission denied.'));
+      () => {
+        // Fallback attempt for laptops/desktops: standard network/Wi-Fi positioning
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            resolve({
+              lat: pos.coords.latitude,
+              lng: pos.coords.longitude,
+            });
+          },
+          (err) => {
+            reject(new Error(err.message || 'Location permission denied.'));
+          },
+          { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 }
+        );
       },
-      { enableHighAccuracy: true, timeout: 8000 }
+      { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
     );
   });
 }
 
 /**
  * Converts raw (lat, lng) coordinates into a real-world street & city name
- * using OpenStreetMap Nominatim Reverse Geocoding.
  */
 export async function reverseGeocode(coords: Coordinates): Promise<ResolvedLocation> {
   try {
@@ -77,8 +110,9 @@ export async function reverseGeocode(coords: Coordinates): Promise<ResolvedLocat
     const cityOrArea =
       addr.suburb ||
       addr.neighbourhood ||
-      addr.city_district ||
+      addr.village ||
       addr.town ||
+      addr.city_district ||
       addr.city ||
       addr.municipality ||
       addr.county ||
@@ -104,8 +138,7 @@ export async function reverseGeocode(coords: Coordinates): Promise<ResolvedLocat
 }
 
 /**
- * Forward geocodes a search string (e.g. "New Baneshwor" or "123 Main St")
- * into real latitude/longitude coordinates.
+ * Forward geocodes a search string into real latitude/longitude coordinates.
  */
 export async function searchAddressCoordinates(
   query: string
@@ -129,6 +162,7 @@ export async function searchAddressCoordinates(
     const cityOrArea =
       addr.suburb ||
       addr.neighbourhood ||
+      addr.village ||
       addr.town ||
       addr.city ||
       match.name ||

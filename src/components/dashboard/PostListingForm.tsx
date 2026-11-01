@@ -92,11 +92,12 @@ export const PostListingForm: React.FC = () => {
   };
 
   useEffect(() => {
-    if (userLocation && !coords) {
+    if (userLocation && (userLocation.lat !== 0 || userLocation.lng !== 0)) {
       setCoords(userLocation);
-      setNeighborhood(locationLabel);
+      if (!neighborhood) setNeighborhood(locationLabel);
+      if (!address) setAddress(locationLabel);
     }
-  }, [userLocation, locationLabel, coords]);
+  }, [userLocation, locationLabel]);
 
   const { co2SavedKg, estimatedMeals } = calculateListingImpact(weightKg);
 
