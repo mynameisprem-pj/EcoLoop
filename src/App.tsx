@@ -26,7 +26,7 @@ import {
   searchAddressCoordinates,
   calculateDistanceKm,
 } from './utils/geoUtils';
-import type { FoodCategory } from './types';
+import type { FoodCategory, SurplusListing } from './types';
 
 export function App() {
   const {
@@ -52,6 +52,9 @@ export function App() {
   } = useEcoStore();
 
   const [viewMode, setViewMode] = useState<'listings' | 'map'>('listings');
+  const [trackedListing, setTrackedListing] = useState<SurplusListing | null>(
+    null
+  );
   const [isLocating, setIsLocating] = useState<boolean>(false);
   const [showLocationPicker, setShowLocationPicker] = useState<boolean>(false);
   const [customCityQuery, setCustomCityQuery] = useState<string>('');
@@ -71,12 +74,16 @@ export function App() {
     try {
       const coords = await requestBrowserGps();
       const resolved = await reverseGeocode(coords);
-      setUserLocation({ lat: resolved.lat, lng: resolved.lng }, resolved.cityOrArea);
+      setUserLocation(
+        { lat: resolved.lat, lng: resolved.lng },
+        resolved.cityOrArea
+      );
     } catch (err) {
       setLocationError(
         err instanceof Error ? err.message : 'Location permission needed'
       );
-      setUserLocation({ lat: 0, lng: 0 }, 'Set Your Location');
+      // Default fallback to central Nepal coordinates if GPS permission denied
+      setUserLocation({ lat: 27.7172, lng: 85.324 }, 'Set Location');
     } finally {
       setIsLocating(false);
     }
@@ -89,7 +96,10 @@ export function App() {
     const result = await searchAddressCoordinates(customCityQuery);
     setIsLocating(false);
     if (result) {
-      setUserLocation({ lat: result.lat, lng: result.lng }, result.cityOrArea);
+      setUserLocation(
+        { lat: result.lat, lng: result.lng },
+        result.cityOrArea
+      );
       setShowLocationPicker(false);
       setCustomCityQuery('');
     }
@@ -116,7 +126,10 @@ export function App() {
           },
         };
       })
-      .sort((a, b) => (a.location.distanceKm ?? 9999) - (b.location.distanceKm ?? 9999));
+      .sort(
+        (a, b) =>
+          (a.location.distanceKm ?? 9999) - (b.location.distanceKm ?? 9999)
+      );
   }, [rawFilteredListings, userLocation]);
 
   const myScopedClaims =
@@ -132,7 +145,13 @@ export function App() {
     }
   };
 
-  // Determine map center: either user's live GPS, or the first active listing, or world view
+  // Triggered when user clicks the distance button on any SurplusCard
+  const handleTrackListingOnMap = (listing: SurplusListing) => {
+    setTrackedListing(listing);
+    setActiveTab('browse');
+    setViewMode('map');
+  };
+
   const activeMapCenter = useMemo(() => {
     if (userLocation && (userLocation.lat !== 0 || userLocation.lng !== 0)) {
       return userLocation;
@@ -143,7 +162,7 @@ export function App() {
         lng: liveListings[0].location.lng,
       };
     }
-    return { lat: 20.0, lng: 0.0 };
+    return { lat: 27.7172, lng: 85.324 };
   }, [userLocation, liveListings]);
 
   if (!isInitialized) {
@@ -161,54 +180,55 @@ export function App() {
     <div className="min-h-screen bg-gradient-to-b from-[#07221B] via-[#081514] to-[#090D16] text-slate-100 pb-24 lg:pb-12">
       <div className="fixed top-0 right-0 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
 
-      {/* Top Responsive Header */}
-      <header className="sticky top-0 z-30 bg-[#071A15]/90 backdrop-blur-xl border-b border-white/10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
+      {/* Clean, Single-Line Responsive Topbar */}
+      <header className="sticky top-0 z-30 bg-[#071A15]/95 backdrop-blur-xl border-b border-white/10">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-14 sm:h-16 flex items-center justify-between gap-2">
+          {/* Left: Clean Brand Logo + Tiny Live Dot */}
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             <button
               type="button"
-              onClick={() => setActiveTab('browse')}
-              className="flex items-center gap-2.5 text-left cursor-pointer"
+              onClick={() => {
+                setActiveTab('browse');
+                setViewMode('listings');
+              }}
+              className="flex items-center gap-2 text-left cursor-pointer shrink-0"
             >
-              <EcoLoopLogo size={36} />
-              <div>
-                <h1 className="text-xl font-extrabold tracking-tight text-white leading-none">
+              <EcoLoopLogo size={32} className="w-8 h-8" />
+              <div className="flex items-center gap-1.5">
+                <span className="text-lg sm:text-xl font-extrabold tracking-tight text-white">
                   Eco<span className="text-emerald-400">Loop</span>
-                </h1>
-                <span className="text-[10px] text-emerald-300/80 font-medium tracking-wider uppercase flex items-center gap-1 mt-0.5">
-                  <span
-                    className={`w-1.5 h-1.5 rounded-full ${
-                      isLiveConnected ? 'bg-emerald-400 animate-ping' : 'bg-amber-400'
-                    }`}
-                  />
-                  {isLiveConnected ? 'Live Cloud Sync' : 'Local Offline Mode'}
                 </span>
-                <span className="text-[10px] text-emerald-300/80 font-medium tracking-wider uppercase block mt-0.5">
-                  Surplus Food Network
-                </span>
+                <span
+                  title={
+                    isLiveConnected ? 'Live Cloud Connected' : 'Offline Mode'
+                  }
+                  className={`w-2 h-2 rounded-full shrink-0 ${
+                    isLiveConnected ? 'bg-emerald-400' : 'bg-amber-400'
+                  }`}
+                />
               </div>
             </button>
 
-            {/* Real Location Badge & Switcher */}
+            {/* Compact Location Pill */}
             <div className="relative">
               <button
                 type="button"
                 onClick={() => setShowLocationPicker((prev) => !prev)}
-                className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-200 bg-white/5 hover:bg-white/10 border border-white/10 px-3 py-1.5 rounded-full transition-colors cursor-pointer"
+                className="inline-flex items-center gap-1 text-xs font-medium text-slate-200 bg-white/5 hover:bg-white/10 border border-white/10 px-2.5 py-1.5 rounded-full transition-colors cursor-pointer"
               >
                 <MapPin className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                <span className="max-w-[140px] sm:max-w-[200px] truncate">
+                <span className="max-w-[95px] sm:max-w-[160px] truncate">
                   {locationLabel}
                 </span>
                 <LocateFixed
-                  className={`w-3.5 h-3.5 text-emerald-400 ml-0.5 shrink-0 ${
+                  className={`w-3 h-3 text-emerald-400 shrink-0 ${
                     isLocating ? 'animate-spin' : ''
                   }`}
                 />
               </button>
 
               {showLocationPicker && (
-                <div className="absolute left-0 mt-2 w-72 rounded-2xl bg-[#0D1916] border border-emerald-500/40 p-3 shadow-2xl z-50 space-y-2.5">
+                <div className="absolute left-0 mt-2 w-64 sm:w-72 rounded-2xl bg-[#0D1916] border border-emerald-500/40 p-3 shadow-2xl z-50 space-y-2.5">
                   <button
                     type="button"
                     onClick={() => {
@@ -217,12 +237,15 @@ export function App() {
                     }}
                     className="w-full py-2 px-3 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/40 text-xs font-bold text-emerald-300 flex items-center justify-center gap-1.5 cursor-pointer"
                   >
-                    <LocateFixed className="w-3.5 h-3.5" /> Detect My Exact GPS
+                    <LocateFixed className="w-3.5 h-3.5" /> Use My Exact GPS
                   </button>
-                  <form onSubmit={handleManualLocationSearch} className="flex gap-1.5">
+                  <form
+                    onSubmit={handleManualLocationSearch}
+                    className="flex gap-1.5"
+                  >
                     <input
                       type="text"
-                      placeholder="Or enter city / area..."
+                      placeholder="Search city or street..."
                       value={customCityQuery}
                       onChange={(e) => setCustomCityQuery(e.target.value)}
                       className="flex-1 rounded-xl bg-black/50 border border-white/15 px-2.5 py-1.5 text-xs text-white placeholder-slate-400 focus:border-emerald-400 focus:outline-none"
@@ -239,7 +262,7 @@ export function App() {
             </div>
           </div>
 
-          {/* Desktop Navigation */}
+          {/* Center: Desktop Navigation */}
           <nav className="hidden lg:flex items-center gap-1 bg-black/35 p-1 rounded-2xl border border-white/10">
             <button
               type="button"
@@ -262,7 +285,7 @@ export function App() {
                   : 'text-slate-300 hover:text-white'
               }`}
             >
-              <PackageOpen className="w-3.5 h-3.5" />{' '}
+              <PackageOpen className="w-3.5 h-3.5" />
               {activeRole === 'donor' ? 'Store Orders' : 'My Pickups'}
               {pendingClaimsCount > 0 && (
                 <span className="ml-1 px-1.5 py-0.2 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black">
@@ -293,46 +316,40 @@ export function App() {
                     : 'text-emerald-400 hover:bg-emerald-500/10'
                 }`}
               >
-                <PlusCircle className="w-3.5 h-3.5" /> List Surplus Food
+                <PlusCircle className="w-3.5 h-3.5" /> Publish Food
               </button>
             )}
           </nav>
 
-          {/* Role Mode Switcher */}
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                const nextRole = activeRole === 'donor' ? 'receiver' : 'donor';
-                setActiveRole(nextRole);
-                if (nextRole === 'receiver' && activeTab === 'post') {
-                  setActiveTab('browse');
-                }
-              }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-400/40 text-xs font-bold text-emerald-300 transition-all cursor-pointer"
-            >
-              {activeRole === 'donor' ? (
-                <>
-                  <Store className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Store Partner</span>
-                </>
-              ) : (
-                <>
-                  <ShoppingBag className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Consumer</span>
-                </>
-              )}
-            </button>
-          </div>
+          {/* Right: Clean Role Toggle */}
+          <button
+            type="button"
+            onClick={() =>
+              setActiveRole(activeRole === 'donor' ? 'receiver' : 'donor')
+            }
+            className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-400/40 text-xs font-bold text-emerald-300 transition-all cursor-pointer shrink-0"
+          >
+            {activeRole === 'donor' ? (
+              <>
+                <Store className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span>Store</span>
+              </>
+            ) : (
+              <>
+                <ShoppingBag className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span>Consumer</span>
+              </>
+            )}
+          </button>
         </div>
       </header>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6">
         {activeTab === 'browse' && (
-          <div className="space-y-5">
+          <div className="space-y-4">
             {/* Search & Category Filters */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-[#101B18]/85 border border-emerald-500/25 p-3.5 rounded-2xl backdrop-blur-xl">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-[#101B18]/85 border border-emerald-500/25 p-3 rounded-2xl backdrop-blur-xl">
               <div className="relative flex-1">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                 <input
@@ -371,7 +388,7 @@ export function App() {
               </div>
             </div>
 
-            {/* Mobile Toggle */}
+            {/* Mobile Toggle: Listings vs Live Map */}
             <div className="grid grid-cols-2 p-1 rounded-full bg-[#111C19]/90 border border-white/15 lg:hidden">
               <button
                 type="button"
@@ -413,15 +430,16 @@ export function App() {
                     <p className="text-xs text-slate-400 max-w-md mx-auto">
                       Local bakeries, grocery stores, and restaurants can publish unsold surplus inventory in real time.
                     </p>
-                    {activeRole === 'donor' && (
-                      <button
-                        type="button"
-                        onClick={() => setActiveTab('post')}
-                        className="mt-2 inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-emerald-500 text-slate-950 text-xs font-extrabold uppercase tracking-wider cursor-pointer"
-                      >
-                        <PlusCircle className="w-4 h-4" /> Publish First Listing
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveRole('donor');
+                        setActiveTab('post');
+                      }}
+                      className="mt-2 inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-emerald-500 text-slate-950 text-xs font-extrabold uppercase tracking-wider cursor-pointer"
+                    >
+                      <PlusCircle className="w-4 h-4" /> Publish First Listing
+                    </button>
                   </div>
                 ) : (
                   liveListings.map((listing) => (
@@ -429,6 +447,7 @@ export function App() {
                       key={listing.id}
                       listing={listing}
                       onClaim={handleRescueClaim}
+                      onTrackOnMap={handleTrackListingOnMap}
                     />
                   ))
                 )}
@@ -442,7 +461,10 @@ export function App() {
                 <LiveStreetMap
                   listings={liveListings}
                   userLocation={activeMapCenter}
+                  trackedListing={trackedListing}
+                  onClearTracking={() => setTrackedListing(null)}
                   onClaim={handleRescueClaim}
+                  isVisible={viewMode === 'map'}
                 />
               </div>
             </div>
@@ -468,7 +490,7 @@ export function App() {
         )}
       </main>
 
-      {/* Mobile Navigation Dock */}
+      {/* Mobile Bottom Dock */}
       <nav className="lg:hidden fixed bottom-4 inset-x-4 max-w-md mx-auto h-16 rounded-3xl bg-[#131D1B]/95 backdrop-blur-2xl border border-white/15 shadow-[0_10px_30px_rgba(0,0,0,0.65)] px-3 flex items-center justify-around z-30">
         <button
           type="button"
@@ -505,7 +527,7 @@ export function App() {
         <button
           type="button"
           onClick={() => setActiveTab('claims')}
-          className={`flex flex-col items-center justify-center w-14 h-full cursor-pointer ${
+          className={`flex flex-col items-center justify-center w-16 h-full cursor-pointer ${
             activeTab === 'claims' ? 'text-emerald-400' : 'text-slate-400'
           }`}
         >
@@ -518,7 +540,7 @@ export function App() {
             )}
           </div>
           <span className="text-[10px] font-medium mt-1">
-            {activeRole === 'donor' ? 'Store Orders' : 'My Pickups'}
+            {activeRole === 'donor' ? 'Orders' : 'My Pickups'}
           </span>
         </button>
 
