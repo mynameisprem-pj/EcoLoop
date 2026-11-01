@@ -359,12 +359,14 @@ export const PostListingForm: React.FC = () => {
           <input
             type="number"
             min="0.5"
-            max="500"
+            max="50"
             step="0.5"
             required
             value={weightKg}
             onChange={(e) =>
-              setWeightKg(Math.max(0.5, parseFloat(e.target.value) || 0.5))
+              setWeightKg(
+                Math.min(50, Math.max(0.5, parseFloat(e.target.value) || 0.5))
+              )
             }
             className="w-full rounded-lg bg-slate-900 border border-white/15 px-3 py-1.5 text-sm font-mono text-emerald-400 focus:border-emerald-400 focus:outline-none"
           />
