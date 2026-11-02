@@ -197,30 +197,36 @@ export const SurplusCard: React.FC<SurplusCardProps> = ({
         </div>
       )}
 
-      {/* Bottom Action Row: Timer + Clickable Distance Map Tracker + Claim Button */}
+      {/* Bottom Action Row: Timer + Consumer-Only Track & Claim Controls */}
       <div className="mt-3 pt-2.5 border-t border-white/10 flex flex-wrap items-center justify-between gap-2">
         <ExpiryActionBanner expiresAt={listing.expiresAt} />
 
         <div className="flex items-center gap-2 ml-auto">
-          <button
-            type="button"
-            onClick={() => onTrackOnMap(listing)}
-            title="Click to track live walking route inside the app"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-emerald-500/20 border border-white/15 hover:border-emerald-400/50 text-xs font-semibold text-emerald-300 transition-all cursor-pointer"
-          >
-            <Navigation className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            <span>{formatDistance(listing.location.distanceKm)} • Track</span>
-          </button>
+          {isConsumer ? (
+            <>
+              <button
+                type="button"
+                onClick={() => onTrackOnMap(listing)}
+                title="Click to track live walking route inside the app"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-emerald-500/20 border border-white/15 hover:border-emerald-400/50 text-xs font-semibold text-emerald-300 transition-all cursor-pointer"
+              >
+                <Navigation className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span>{formatDistance(listing.location.distanceKm)} • Track</span>
+              </button>
 
-          {isConsumer && (
-            <button
-              type="button"
-              onClick={() => onClaim(listing.id)}
-              className="inline-flex items-center gap-1 px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs uppercase tracking-wider shadow-[0_0_12px_rgba(16,185,129,0.3)] transition-all cursor-pointer"
-            >
-              <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-              Claim
-            </button>
+              <button
+                type="button"
+                onClick={() => onClaim(listing.id)}
+                className="inline-flex items-center gap-1 px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs uppercase tracking-wider shadow-[0_0_12px_rgba(16,185,129,0.3)] transition-all cursor-pointer"
+              >
+                <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                Claim
+              </button>
+            </>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-[11px] font-bold text-emerald-300">
+              ● Live Store Listing ({listing.location.neighborhood})
+            </span>
           )}
         </div>
       </div>
