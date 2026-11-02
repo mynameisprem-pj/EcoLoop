@@ -35,6 +35,8 @@ export function App() {
     isLiveConnected,
     activeTab,
     setActiveTab,
+    trackedListing,
+    setTrackedListing,
     activeRole,
     setActiveRole,
     userLocation,
@@ -52,9 +54,6 @@ export function App() {
   } = useEcoStore();
 
   const [viewMode, setViewMode] = useState<'listings' | 'map'>('listings');
-  const [trackedListing, setTrackedListing] = useState<SurplusListing | null>(
-    null
-  );
   const [isLocating, setIsLocating] = useState<boolean>(false);
   const [showLocationPicker, setShowLocationPicker] = useState<boolean>(false);
   const [customCityQuery, setCustomCityQuery] = useState<string>('');
@@ -479,7 +478,7 @@ export function App() {
 
         {activeTab === 'claims' && (
           <div className="max-w-3xl mx-auto">
-            <MyClaimsView />
+            <MyClaimsView onTrackClaimedListing={handleTrackListingOnMap} />
           </div>
         )}
 
