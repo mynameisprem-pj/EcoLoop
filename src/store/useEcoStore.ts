@@ -84,6 +84,7 @@ interface EcoStoreState {
 
   activeTab: 'browse' | 'post' | 'claims' | 'analytics';
   selectedClaimForModal: ClaimRecord | null;
+  trackedListing: SurplusListing | null;
   filters: FilterState;
 
   initializeStore: () => Promise<void>;
@@ -96,6 +97,7 @@ interface EcoStoreState {
   setUserName: (name: string) => void;
   setActiveTab: (tab: EcoStoreState['activeTab']) => void;
   setSelectedClaimForModal: (claim: ClaimRecord | null) => void;
+  setTrackedListing: (listing: SurplusListing | null) => void;
 
   setSearchQuery: (query: string) => void;
   setCategoryFilter: (category: FoodCategory | 'all') => void;
@@ -154,6 +156,7 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
 
   activeTab: 'browse',
   selectedClaimForModal: null,
+  trackedListing: null,
   filters: DEFAULT_FILTERS,
 
   initializeStore: async () => {
@@ -288,6 +291,7 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
 
   setActiveTab: (tab) => set({ activeTab: tab }),
   setSelectedClaimForModal: (claim) => set({ selectedClaimForModal: claim }),
+  setTrackedListing: (listing) => set({ trackedListing: listing }),
 
   setSearchQuery: (searchQuery) =>
     set((state) => ({ filters: { ...state.filters, searchQuery } })),
