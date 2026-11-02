@@ -4,7 +4,6 @@ import {
   Navigation,
   Sparkles,
   Check,
-  ExternalLink,
   BadgeCheck,
   Trash2,
   Flag,
@@ -206,12 +205,11 @@ export const SurplusCard: React.FC<SurplusCardProps> = ({
           <button
             type="button"
             onClick={() => onTrackOnMap(listing)}
-            title="Click to track route from your location to this store on the map"
+            title="Click to track live walking route inside the app"
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-emerald-500/20 border border-white/15 hover:border-emerald-400/50 text-xs font-semibold text-emerald-300 transition-all cursor-pointer"
           >
             <Navigation className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            <span>{formatDistance(listing.location.distanceKm)}</span>
-            <ExternalLink className="w-3 h-3 opacity-70" />
+            <span>{formatDistance(listing.location.distanceKm)} • Track</span>
           </button>
 
           {isConsumer && (
