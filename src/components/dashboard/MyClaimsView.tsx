@@ -9,15 +9,25 @@ import {
   Camera,
   Store,
   UserCheck,
+  Navigation,
 } from 'lucide-react';
 import { useEcoStore } from '../../store/useEcoStore';
+import type { SurplusListing } from '../../types';
 
-export const MyClaimsView: React.FC = () => {
+interface MyClaimsViewProps {
+  onTrackClaimedListing?: (listing: SurplusListing) => void;
+}
+
+export const MyClaimsView: React.FC<MyClaimsViewProps> = ({
+  onTrackClaimedListing,
+}) => {
   const {
     activeRole,
+    listings,
     getMyConsumerClaims,
     getIncomingStoreClaims,
     setSelectedClaimForModal,
+    setTrackedListing,
     cancelClaim,
     setActiveTab,
   } = useEcoStore();
@@ -90,6 +100,17 @@ export const MyClaimsView: React.FC = () => {
       {relevantClaims.map((claim) => {
         const isPending = claim.status === 'pending_pickup';
         const isVerified = claim.status === 'verified_complete';
+        const matchedListing = listings.find((l) => l.id === claim.listingId);
+
+        const handleTrackStore = () => {
+          if (!matchedListing) return;
+          if (onTrackClaimedListing) {
+            onTrackClaimedListing(matchedListing);
+          } else {
+            setTrackedListing(matchedListing);
+            setActiveTab('browse');
+          }
+        };
 
         return (
           <div
@@ -165,11 +186,11 @@ export const MyClaimsView: React.FC = () => {
             </div>
 
             {isPending && (
-              <div className="flex items-center gap-2.5 mt-3.5 pt-3 border-t border-white/10">
+              <div className="flex flex-wrap items-center gap-2 mt-3.5 pt-3 border-t border-white/10">
                 <button
                   type="button"
                   onClick={() => setSelectedClaimForModal(claim)}
-                  className="flex-1 py-2.5 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 shadow-[0_0_15px_rgba(16,185,129,0.35)] transition-all cursor-pointer"
+                  className="flex-1 min-w-[160px] py-2.5 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 shadow-[0_0_15px_rgba(16,185,129,0.35)] transition-all cursor-pointer"
                 >
                   {isStorePartner ? (
                     <>
@@ -184,6 +205,17 @@ export const MyClaimsView: React.FC = () => {
                     </>
                   )}
                 </button>
+
+                {!isStorePartner && matchedListing && (
+                  <button
+                    type="button"
+                    onClick={handleTrackStore}
+                    className="py-2.5 px-3 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-400/40 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <Navigation className="w-3.5 h-3.5 text-emerald-400" />
+                    Track Store Route
+                  </button>
+                )}
 
                 <button
                   type="button"
