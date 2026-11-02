@@ -14,7 +14,9 @@ import {
   Layers,
   Footprints,
   LocateFixed,
+  QrCode,
 } from 'lucide-react';
+import { useEcoStore } from '../../store/useEcoStore';
 
 interface LiveStreetMapProps {
   listings: SurplusListing[];
@@ -32,26 +34,27 @@ export const LiveStreetMap: React.FC<LiveStreetMapProps> = ({
   onClearTracking,
   onClaim,
 }) => {
+  const { activeRole, userId, setActiveTab } = useEcoStore();
+  const isStorePartner = activeRole === 'donor';
+
   const [selectedListing, setSelectedListing] = useState<SurplusListing | null>(
     trackedListing || listings[0] || null
   );
-  const [mapType, setMapType] = useState<'m' | 'k'>('m'); // 'm' = Road Map, 'k' = Satellite
+  const [mapType, setMapType] = useState<'m' | 'k'>('m');
   const [isRoutingInApp, setIsRoutingInApp] = useState<boolean>(
-    Boolean(trackedListing)
+    Boolean(trackedListing) && !isStorePartner
   );
   const [liveHumanCoords, setLiveHumanCoords] =
     useState<Coordinates>(userLocation);
 
-  // Keep human coordinates synced with topbar GPS + live walking movement
   useEffect(() => {
     if (isValidCoordinate(userLocation)) {
       setLiveHumanCoords(userLocation);
     }
   }, [userLocation]);
 
-  // Continuous live GPS tracking while routing inside the app
   useEffect(() => {
-    if (!('geolocation' in navigator) || !isRoutingInApp) return;
+    if (!('geolocation' in navigator) || !isRoutingInApp || isStorePartner) return;
 
     const watchId = navigator.geolocation.watchPosition(
       (pos) => {
@@ -65,19 +68,20 @@ export const LiveStreetMap: React.FC<LiveStreetMapProps> = ({
     );
 
     return () => navigator.geolocation.clearWatch(watchId);
-  }, [isRoutingInApp]);
+  }, [isRoutingInApp, isStorePartner]);
 
-  // Whenever user clicks the distance button on a card, automatically start in-app route tracking
   useEffect(() => {
     if (trackedListing) {
       setSelectedListing(trackedListing);
-      setIsRoutingInApp(true);
+      if (!isStorePartner) {
+        setIsRoutingInApp(true);
+      }
     } else if (!selectedListing && listings.length > 0) {
       setSelectedListing(listings[0]);
     }
-  }, [trackedListing, listings]);
+  }, [trackedListing, listings, isStorePartner]);
 
-  const activeTarget = selectedListing || trackedListing;
+  const activeTarget = trackedListing || selectedListing;
 
   const targetLat =
     activeTarget && isValidCoordinate(activeTarget.location)
@@ -99,7 +103,6 @@ export const LiveStreetMap: React.FC<LiveStreetMapProps> = ({
       ? calculateDistanceKm(liveHumanCoords, activeTarget.location)
       : undefined;
 
-  // Estimate walking time (~12 mins per km)
   const estimatedWalkMins =
     distanceKm !== undefined ? Math.max(1, Math.round(distanceKm * 12)) : null;
 
@@ -110,18 +113,16 @@ export const LiveStreetMap: React.FC<LiveStreetMapProps> = ({
     return `${km.toFixed(1)} km away`;
   };
 
-  /**
-   * IN-APP GOOGLE MAPS URL:
-   * - When isRoutingInApp is TRUE and human & store are >30m apart, uses saddr (Human) & daddr (Store)
-   *   to draw the live turn-by-turn route directly inside the iframe!
-   * - If they are at the exact same spot (<30m) or viewing general map, shows the exact pin view.
-   */
   const isSameSpot = distanceKm !== undefined && distanceKm < 0.03;
 
+  // In Store Mode, always show clean Pin View. In Consumer Mode, allow A-to-B route tracking.
   const googleEmbedUrl =
-    isRoutingInApp && activeTarget && hasValidOrigin && !isSameSpot
+    !isStorePartner && isRoutingInApp && activeTarget && hasValidOrigin && !isSameSpot
       ? `https://maps.google.com/maps?saddr=${liveHumanCoords.lat},${liveHumanCoords.lng}&daddr=${targetLat},${targetLng}&dirflg=w&t=${mapType}&ie=UTF8&output=embed`
       : `https://maps.google.com/maps?q=${targetLat},${targetLng}&t=${mapType}&z=16&ie=UTF8&iwloc=&output=embed`;
+
+  const isAlreadyClaimed = activeTarget && activeTarget.status !== 'available';
+  const isOwnStoreItem = activeTarget && activeTarget.donorId === userId;
 
   return (
     <div className="rounded-2xl overflow-hidden border border-emerald-500/35 bg-[#0D1815] shadow-[0_0_30px_rgba(16,185,129,0.14)] flex flex-col">
@@ -129,7 +130,7 @@ export const LiveStreetMap: React.FC<LiveStreetMapProps> = ({
       <div className="p-3 bg-[#101E1A] border-b border-white/10 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
           <div className="w-7 h-7 rounded-lg bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center shrink-0">
-            {isRoutingInApp ? (
+            {isRoutingInApp && !isStorePartner ? (
               <Navigation className="w-4 h-4 text-emerald-400 animate-pulse" />
             ) : (
               <Compass className="w-4 h-4 text-emerald-400" />
@@ -139,19 +140,22 @@ export const LiveStreetMap: React.FC<LiveStreetMapProps> = ({
             <h3 className="text-xs font-extrabold text-white truncate">
               {activeTarget
                 ? `${activeTarget.donorName} (${activeTarget.location.neighborhood})`
-                : 'Live Google Map — Your Location'}
+                : 'Live Google Map — Store Network'}
             </h3>
             <p className="text-[11px] text-emerald-300 font-medium truncate">
               {activeTarget
-                ? `📍 ${activeTarget.location.address} • ${formatDist(distanceKm)}${
-                    estimatedWalkMins ? ` (~${estimatedWalkMins} min walk)` : ''
+                ? `📍 ${activeTarget.location.address}${
+                    !isStorePartner
+                      ? ` • ${formatDist(distanceKm)}${
+                          estimatedWalkMins ? ` (~${estimatedWalkMins} min walk)` : ''
+                        }`
+                      : ''
                   }`
                 : `GPS: ${targetLat.toFixed(4)}, ${targetLng.toFixed(4)}`}
             </p>
           </div>
         </div>
 
-        {/* Toggle Road Map vs Satellite View */}
         <button
           type="button"
           onClick={() => setMapType((prev) => (prev === 'm' ? 'k' : 'm'))}
@@ -173,8 +177,9 @@ export const LiveStreetMap: React.FC<LiveStreetMapProps> = ({
                 key={item.id}
                 type="button"
                 onClick={() => {
+                  if (onClearTracking) onClearTracking();
                   setSelectedListing(item);
-                  setIsRoutingInApp(true);
+                  if (!isStorePartner) setIsRoutingInApp(true);
                 }}
                 className={`px-2.5 py-1 rounded-xl text-xs font-semibold shrink-0 flex items-center gap-1.5 border transition-all cursor-pointer ${
                   isSelected
@@ -184,7 +189,7 @@ export const LiveStreetMap: React.FC<LiveStreetMapProps> = ({
               >
                 <MapPin className="w-3 h-3 shrink-0" />
                 <span className="truncate max-w-[120px]">{item.donorName}</span>
-                {d !== undefined && (
+                {!isStorePartner && d !== undefined && (
                   <span className="opacity-80 text-[10px]">
                     ({d < 1 ? `${Math.round(d * 1000)}m` : `${d.toFixed(1)}km`})
                   </span>
@@ -195,7 +200,7 @@ export const LiveStreetMap: React.FC<LiveStreetMapProps> = ({
         </div>
       )}
 
-      {/* Embedded Live In-App Google Map / Route Frame */}
+      {/* Embedded Live Google Map Frame */}
       <div className="relative w-full h-[380px] lg:h-[460px] bg-slate-900">
         <iframe
           key={`${googleEmbedUrl}`}
@@ -207,34 +212,31 @@ export const LiveStreetMap: React.FC<LiveStreetMapProps> = ({
           referrerPolicy="no-referrer-when-downgrade"
         />
 
-        {/* Live Status Pill Overlay */}
-        {isRoutingInApp && activeTarget && (
+        {!isStorePartner && isRoutingInApp && activeTarget && (
           <div className="absolute bottom-3 left-3 z-10 px-3 py-1.5 rounded-xl bg-slate-950/90 backdrop-blur-md border border-emerald-400/50 flex items-center gap-2 text-[11px] font-bold text-emerald-300 shadow-lg">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
             <span>
               {isSameSpot
                 ? 'You are at the Store Location (<30m)'
-                : `Live In-App Route Active • ${formatDist(distanceKm)}`}
+                : `Live Walking Route Active • ${formatDist(distanceKm)}`}
             </span>
           </div>
         )}
       </div>
 
-      {/* Bottom In-App Route Controls & Claim Bar */}
-      <div className="p-3 bg-[#101E1A] border-t border-white/10 flex flex-wrap items-center justify-between gap-2">
-        <div className="text-xs text-slate-300 min-w-0">
-          <span className="font-semibold text-white truncate block sm:inline">
-            {activeTarget ? activeTarget.title : 'Live GPS Pin'}
-          </span>
-          {activeTarget && (
+      {/* Bottom Footer: ONLY shows Track Route & Claim buttons when in CONSUMER Mode */}
+      {!isStorePartner && activeTarget && (
+        <div className="p-3 bg-[#101E1A] border-t border-white/10 flex flex-wrap items-center justify-between gap-2">
+          <div className="text-xs text-slate-300 min-w-0">
+            <span className="font-semibold text-white truncate block sm:inline">
+              {activeTarget.title}
+            </span>
             <span className="text-emerald-400 font-bold sm:ml-2">
               • {formatDist(distanceKm)}
             </span>
-          )}
-        </div>
+          </div>
 
-        <div className="flex items-center gap-2 ml-auto">
-          {activeTarget && (
+          <div className="flex items-center gap-2 ml-auto">
             <button
               type="button"
               onClick={() => {
@@ -260,20 +262,31 @@ export const LiveStreetMap: React.FC<LiveStreetMapProps> = ({
                 </>
               )}
             </button>
-          )}
 
-          {activeTarget && (
-            <button
-              type="button"
-              onClick={() => onClaim(activeTarget.id)}
-              className="inline-flex items-center gap-1 px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs uppercase tracking-wider cursor-pointer"
-            >
-              <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-              Claim
-            </button>
-          )}
+            {isAlreadyClaimed ? (
+              <button
+                type="button"
+                onClick={() => setActiveTab('claims')}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-xs uppercase tracking-wider cursor-pointer"
+              >
+                <QrCode className="w-3.5 h-3.5" />
+                My QR Pass
+              </button>
+            ) : (
+              !isOwnStoreItem && (
+                <button
+                  type="button"
+                  onClick={() => onClaim(activeTarget.id)}
+                  className="inline-flex items-center gap-1 px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs uppercase tracking-wider cursor-pointer"
+                >
+                  <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                  Claim
+                </button>
+              )
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };
