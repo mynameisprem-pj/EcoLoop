@@ -58,8 +58,8 @@ export const PostListingForm: React.FC = () => {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState<FoodCategory>('produce');
-  const [weightKg, setWeightKg] = useState<number>(3.0);
-  const [expiryHours, setExpiryHours] = useState<number>(4.0);
+  const [weightInput, setWeightInput] = useState<string>('3');
+  const [expiryInput, setExpiryInput] = useState<string>('4');
   const [pickupWindow, setPickupWindow] = useState('Today before closing');
   const [storageRequirement, setStorageRequirement] = useState<
     'ambient' | 'refrigerated' | 'frozen'
@@ -85,7 +85,9 @@ export const PostListingForm: React.FC = () => {
       const compressed = await compressFoodImage(file);
       setImageUrl(compressed);
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'Failed to process photo');
+      setFormError(
+        err instanceof Error ? err.message : 'Failed to process photo'
+      );
     } finally {
       setIsUploadingImage(false);
     }
@@ -99,7 +101,8 @@ export const PostListingForm: React.FC = () => {
     }
   }, [userLocation, locationLabel]);
 
-  const { co2SavedKg, estimatedMeals } = calculateListingImpact(weightKg);
+  const previewWeight = Math.min(50, Math.max(0, parseFloat(weightInput) || 0));
+  const { co2SavedKg, estimatedMeals } = calculateListingImpact(previewWeight);
 
   const handleUseCurrentGps = async () => {
     setIsLocating(true);
@@ -129,7 +132,9 @@ export const PostListingForm: React.FC = () => {
     setIsLocating(false);
 
     if (!result) {
-      setFormError('Could not find coordinates for that address. Try a nearby landmark or city.');
+      setFormError(
+        'Could not find coordinates for that address. Try a nearby landmark or city.'
+      );
       return;
     }
 
@@ -163,6 +168,15 @@ export const PostListingForm: React.FC = () => {
       return;
     }
 
+    const parsedWeight = Math.min(
+      50,
+      Math.max(0.5, parseFloat(weightInput) || 0.5)
+    );
+    const parsedExpiryHours = Math.min(
+      48,
+      Math.max(0.5, parseFloat(expiryInput) || 1)
+    );
+
     setUserName(donorName.trim());
 
     await addListing({
@@ -172,8 +186,8 @@ export const PostListingForm: React.FC = () => {
       description,
       category,
       dietaryTags: selectedTags,
-      weightKg,
-      expiryHours,
+      weightKg: parsedWeight,
+      expiryHours: parsedExpiryHours,
       pickupWindow,
       storageRequirement,
       address: address || neighborhood || 'Verified Store Location',
@@ -360,14 +374,16 @@ export const PostListingForm: React.FC = () => {
             type="number"
             min="0.5"
             max="50"
-            step="0.5"
+            step="any"
             required
-            value={weightKg}
-            onChange={(e) =>
-              setWeightKg(
-                Math.min(50, Math.max(0.5, parseFloat(e.target.value) || 0.5))
-              )
-            }
+            placeholder="e.g., 2.5"
+            value={weightInput}
+            onChange={(e) => setWeightInput(e.target.value)}
+            onBlur={() => {
+              const val = parseFloat(weightInput);
+              if (Number.isNaN(val) || val < 0.5) setWeightInput('0.5');
+              else if (val > 50) setWeightInput('50');
+            }}
             className="w-full rounded-lg bg-slate-900 border border-white/15 px-3 py-1.5 text-sm font-mono text-emerald-400 focus:border-emerald-400 focus:outline-none"
           />
         </div>
@@ -380,12 +396,16 @@ export const PostListingForm: React.FC = () => {
             type="number"
             min="0.5"
             max="48"
-            step="0.5"
+            step="any"
             required
-            value={expiryHours}
-            onChange={(e) =>
-              setExpiryHours(Math.max(0.5, parseFloat(e.target.value) || 1))
-            }
+            placeholder="e.g., 2"
+            value={expiryInput}
+            onChange={(e) => setExpiryInput(e.target.value)}
+            onBlur={() => {
+              const val = parseFloat(expiryInput);
+              if (Number.isNaN(val) || val < 0.5) setExpiryInput('0.5');
+              else if (val > 48) setExpiryInput('48');
+            }}
             className="w-full rounded-lg bg-slate-900 border border-white/15 px-3 py-1.5 text-sm font-mono text-amber-300 focus:border-emerald-400 focus:outline-none"
           />
         </div>
