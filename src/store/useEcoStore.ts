@@ -8,6 +8,7 @@ import type {
   UserRole,
   ImpactMetrics,
   DonorProfile,
+  AccountProfile,
 } from '../types';
 import { db, calculateListingImpact } from '../db/database';
 import {
@@ -22,6 +23,8 @@ import {
   mapListingToRow,
   mapRowToClaim,
   mapClaimToRow,
+  mapRowToProfile,
+  mapProfileToRow,
 } from '../lib/supabase';
 
 export type SortOption = 'urgency' | 'distance' | 'impact';
@@ -51,9 +54,6 @@ export interface NewListingInput {
   imageUrl?: string;
 }
 
-/**
- * Generates or retrieves a unique persistent ID for this specific phone/browser
- */
 function getOrCreateDeviceUserId(): string {
   const storageKey = 'ecoloop_device_user_id';
   let existing = localStorage.getItem(storageKey);
@@ -67,6 +67,7 @@ function getOrCreateDeviceUserId(): string {
 interface EcoStoreState {
   listings: SurplusListing[];
   claims: ClaimRecord[];
+  verifiedDonorIds: string[];
   impact: ImpactMetrics;
   isInitialized: boolean;
   isLoading: boolean;
@@ -77,10 +78,12 @@ interface EcoStoreState {
   locationLabel: string;
   locationError: string | null;
 
-  // Unique Device Identity & Role
   userId: string;
   activeRole: UserRole;
   userName: string;
+  currentUser: AccountProfile | null;
+  authModalOpen: boolean;
+  pendingAuthAction: (() => void) | null;
 
   activeTab: 'browse' | 'post' | 'claims' | 'analytics';
   selectedClaimForModal: ClaimRecord | null;
@@ -99,6 +102,18 @@ interface EcoStoreState {
   setSelectedClaimForModal: (claim: ClaimRecord | null) => void;
   setTrackedListing: (listing: SurplusListing | null) => void;
 
+  setAuthModalOpen: (open: boolean, afterAuth?: () => void) => void;
+  signInWithEmail: (
+    email: string,
+    displayName: string,
+    password?: string
+  ) => Promise<void>;
+  signInWithGoogle: () => Promise<void>;
+  signInAsDemo: (role: UserRole, verified?: boolean) => Promise<void>;
+  verifyCurrentStore: (regCode: string) => Promise<boolean>;
+  toggleInstantStoreVerification: () => Promise<void>;
+  signOutAccount: () => Promise<void>;
+
   setSearchQuery: (query: string) => void;
   setCategoryFilter: (category: FoodCategory | 'all') => void;
   toggleDietaryTag: (tag: DietaryTag) => void;
@@ -106,7 +121,7 @@ interface EcoStoreState {
   setSortBy: (sort: SortOption) => void;
   resetFilters: () => void;
 
-  addListing: (input: NewListingInput) => Promise<SurplusListing>;
+  addListing: (input: NewListingInput) => Promise<SurplusListing | null>;
   claimListing: (
     listingId: string,
     consumerName?: string
@@ -115,7 +130,6 @@ interface EcoStoreState {
   cancelClaim: (claimId: string) => Promise<void>;
   deleteOrReportListing: (listingId: string) => Promise<void>;
 
-  // Role-Scoped Selectors
   getFilteredListings: () => SurplusListing[];
   getMyConsumerClaims: () => ClaimRecord[];
   getIncomingStoreClaims: () => ClaimRecord[];
@@ -130,10 +144,61 @@ const DEFAULT_FILTERS: FilterState = {
 };
 
 let realtimeSubscribed = false;
+let authListenerAttached = false;
+
+async function hydrateProfileFromCloud(
+  uid: string,
+  email: string,
+  fallbackName: string,
+  role: UserRole,
+  authMode: 'supabase' | 'demo',
+  defaultVerified: boolean,
+  set: (partial: Partial<EcoStoreState>) => void,
+  refreshData: () => Promise<void>
+) {
+  let profile: AccountProfile = {
+    id: uid,
+    email,
+    displayName: fallbackName || email.split('@')[0] || 'EcoLoop Member',
+    role,
+    verifiedStore: defaultVerified,
+    maxWeightCapKg: defaultVerified ? 50 : 5,
+    authMode,
+  };
+
+  if (supabase && isCloudConfigured) {
+    const { data: existingRow } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', uid)
+      .maybeSingle();
+
+    if (existingRow) {
+      profile = mapRowToProfile(existingRow, authMode);
+      if (fallbackName.trim() && existingRow.display_name !== fallbackName.trim()) {
+        profile.displayName = fallbackName.trim();
+        await supabase.from('profiles').upsert(mapProfileToRow(profile));
+      }
+    } else {
+      await supabase.from('profiles').upsert(mapProfileToRow(profile));
+    }
+  }
+
+  localStorage.setItem('ecoloop_user_name', profile.displayName);
+
+  set({
+    userId: uid,
+    userName: profile.displayName,
+    currentUser: profile,
+  });
+
+  await refreshData();
+}
 
 export const useEcoStore = create<EcoStoreState>((set, get) => ({
   listings: [],
   claims: [],
+  verifiedDonorIds: ['demo-store-verified-01'],
   impact: {
     totalWeightKg: 0,
     totalMealsSaved: 0,
@@ -151,8 +216,12 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
   locationError: null,
 
   userId: getOrCreateDeviceUserId(),
-  activeRole: (localStorage.getItem('ecoloop_active_role') as UserRole) || 'receiver',
+  activeRole:
+    (localStorage.getItem('ecoloop_active_role') as UserRole) || 'receiver',
   userName: localStorage.getItem('ecoloop_user_name') || '',
+  currentUser: null,
+  authModalOpen: false,
+  pendingAuthAction: null,
 
   activeTab: 'browse',
   selectedClaimForModal: null,
@@ -167,7 +236,53 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
       await get().refreshData();
       await get().sweepExpiredListings();
 
-      if (supabase && !realtimeSubscribed) {
+      if (supabase && isCloudConfigured && !authListenerAttached) {
+        authListenerAttached = true;
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (sessionData.session?.user) {
+          const u = sessionData.session.user;
+          await hydrateProfileFromCloud(
+            u.id,
+            u.email || '',
+            u.user_metadata?.full_name || u.email?.split('@')[0] || '',
+            get().activeRole,
+            'supabase',
+            false,
+            set,
+            get().refreshData
+          );
+        }
+
+        supabase.auth.onAuthStateChange(async (event, session) => {
+          if (event === 'SIGNED_IN' && session?.user) {
+            const u = session.user;
+            const action = get().pendingAuthAction;
+            await hydrateProfileFromCloud(
+              u.id,
+              u.email || '',
+              u.user_metadata?.full_name || u.email?.split('@')[0] || '',
+              get().activeRole,
+              'supabase',
+              false,
+              set,
+              get().refreshData
+            );
+            set({ authModalOpen: false, pendingAuthAction: null });
+            if (action) action();
+          } else if (event === 'SIGNED_OUT') {
+            const deviceId = getOrCreateDeviceUserId();
+            set({
+              userId: deviceId,
+              currentUser: null,
+              authModalOpen: false,
+              pendingAuthAction: null,
+            });
+            await get().refreshData();
+          }
+        });
+      }
+
+      if (supabase && isCloudConfigured && !realtimeSubscribed) {
         realtimeSubscribed = true;
         supabase
           .channel('ecoloop-live-network')
@@ -181,6 +296,13 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
           .on(
             'postgres_changes',
             { event: '*', schema: 'public', table: 'claims' },
+            () => {
+              get().refreshData();
+            }
+          )
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'profiles' },
             () => {
               get().refreshData();
             }
@@ -204,6 +326,7 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
         const [
           { data: cloudListings, error: lErr },
           { data: cloudClaims, error: cErr },
+          { data: cloudProfiles },
         ] = await Promise.all([
           supabase
             .from('listings')
@@ -213,7 +336,21 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
             .from('claims')
             .select('*')
             .order('claimed_at', { ascending: false }),
+          supabase.from('profiles').select('id, verified_store'),
         ]);
+
+        const verifiedIds = new Set<string>(['demo-store-verified-01']);
+        if (cloudProfiles) {
+          for (const p of cloudProfiles) {
+            if (p.verified_store && p.id) {
+              verifiedIds.add(String(p.id));
+            }
+          }
+        }
+        const cur = get().currentUser;
+        if (cur?.verifiedStore) {
+          verifiedIds.add(cur.id);
+        }
 
         if (!lErr && !cErr && cloudListings && cloudClaims) {
           const parsedListings = cloudListings.map(mapRowToListing);
@@ -227,7 +364,12 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
           });
 
           const impact = computeAggregateImpact(parsedListings, parsedClaims);
-          set({ listings: parsedListings, claims: parsedClaims, impact });
+          set({
+            listings: parsedListings,
+            claims: parsedClaims,
+            verifiedDonorIds: Array.from(verifiedIds),
+            impact,
+          });
           return;
         }
       }
@@ -237,8 +379,18 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
         db.claims.orderBy('claimedAt').reverse().toArray(),
       ]);
 
+      const verifiedIds = new Set<string>(get().verifiedDonorIds);
+      if (get().currentUser?.verifiedStore) {
+        verifiedIds.add(get().currentUser!.id);
+      }
+
       const impact = computeAggregateImpact(localListings, localClaims);
-      set({ listings: localListings, claims: localClaims, impact });
+      set({
+        listings: localListings,
+        claims: localClaims,
+        verifiedDonorIds: Array.from(verifiedIds),
+        impact,
+      });
     } catch (err) {
       console.error('[EcoLoop]: Sync error:', err);
     }
@@ -286,12 +438,179 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
 
   setUserName: (name) => {
     localStorage.setItem('ecoloop_user_name', name);
-    set({ userName: name });
+    set((s) => ({
+      userName: name,
+      currentUser: s.currentUser ? { ...s.currentUser, displayName: name } : null,
+    }));
   },
 
   setActiveTab: (tab) => set({ activeTab: tab }),
   setSelectedClaimForModal: (claim) => set({ selectedClaimForModal: claim }),
   setTrackedListing: (listing) => set({ trackedListing: listing }),
+
+  setAuthModalOpen: (open, afterAuth) =>
+    set({
+      authModalOpen: open,
+      pendingAuthAction: open ? afterAuth || null : null,
+    }),
+
+  signInWithEmail: async (email, displayName, password = 'EcoLoopSync!2026') => {
+    if (!supabase || !isCloudConfigured) {
+      throw new Error('Supabase cloud is not configured.');
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanName = displayName.trim() || cleanEmail.split('@')[0];
+
+    let { data, error } = await supabase.auth.signInWithPassword({
+      email: cleanEmail,
+      password,
+    });
+
+    if (error) {
+      const signUpRes = await supabase.auth.signUp({
+        email: cleanEmail,
+        password,
+        options: { data: { full_name: cleanName } },
+      });
+      if (signUpRes.error) throw new Error(signUpRes.error.message);
+      data = signUpRes.data;
+    }
+
+    if (data.user) {
+      await hydrateProfileFromCloud(
+        data.user.id,
+        cleanEmail,
+        cleanName,
+        get().activeRole,
+        'supabase',
+        false,
+        set,
+        get().refreshData
+      );
+    }
+
+    const action = get().pendingAuthAction;
+    set({ authModalOpen: false, pendingAuthAction: null, error: null });
+    if (action) action();
+  },
+
+  signInWithGoogle: async () => {
+    if (!supabase || !isCloudConfigured) {
+      throw new Error('Supabase cloud is not configured.');
+    }
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: window.location.origin,
+      },
+    });
+    if (error) throw new Error(error.message);
+  },
+
+  signInAsDemo: async (role, verified = role === 'donor') => {
+    const demoId =
+      role === 'donor'
+        ? verified
+          ? 'demo-store-verified-01'
+          : 'demo-store-unverified-01'
+        : 'demo-consumer-01';
+    const demoEmail =
+      role === 'donor'
+        ? verified
+          ? 'verified-store@ecoloop.demo'
+          : 'unverified-store@ecoloop.demo'
+        : 'consumer@ecoloop.demo';
+    const demoName =
+      role === 'donor'
+        ? verified
+          ? 'Sunrise Verified Bakery'
+          : 'Unverified Community Donor'
+        : 'Community Rescuer';
+
+    set({ activeRole: role });
+    await hydrateProfileFromCloud(
+      demoId,
+      demoEmail,
+      demoName,
+      role,
+      'demo',
+      verified,
+      set,
+      get().refreshData
+    );
+
+    const action = get().pendingAuthAction;
+    set({ authModalOpen: false, pendingAuthAction: null, error: null });
+    if (action) action();
+  },
+
+  verifyCurrentStore: async (regCode) => {
+    const cleanCode = regCode.trim().toUpperCase();
+    if (cleanCode.length < 5) return false;
+
+    const { currentUser, userId } = get();
+    if (!currentUser) return false;
+
+    const updated: AccountProfile = {
+      ...currentUser,
+      verifiedStore: true,
+      businessRegCode: cleanCode,
+      maxWeightCapKg: 50,
+    };
+
+    if (supabase && isCloudConfigured && currentUser.authMode === 'supabase') {
+      await supabase.from('profiles').upsert(mapProfileToRow(updated));
+    }
+
+    set((s) => ({
+      currentUser: updated,
+      verifiedDonorIds: Array.from(new Set([...s.verifiedDonorIds, userId])),
+    }));
+    return true;
+  },
+
+  toggleInstantStoreVerification: async () => {
+    const { currentUser, userId } = get();
+    if (!currentUser) return;
+
+    const nextVerified = !currentUser.verifiedStore;
+    const updated: AccountProfile = {
+      ...currentUser,
+      verifiedStore: nextVerified,
+      businessRegCode: nextVerified ? currentUser.businessRegCode || 'DEMO-VERIFIED' : undefined,
+      maxWeightCapKg: nextVerified ? 50 : 5,
+    };
+
+    if (supabase && isCloudConfigured && currentUser.authMode === 'supabase') {
+      await supabase.from('profiles').upsert(mapProfileToRow(updated));
+    }
+
+    set((s) => ({
+      currentUser: updated,
+      verifiedDonorIds: nextVerified
+        ? Array.from(new Set([...s.verifiedDonorIds, userId]))
+        : s.verifiedDonorIds.filter((id) => id !== userId),
+    }));
+  },
+
+  signOutAccount: async () => {
+    if (
+      supabase &&
+      isCloudConfigured &&
+      get().currentUser?.authMode === 'supabase'
+    ) {
+      await supabase.auth.signOut();
+    }
+    const deviceId = getOrCreateDeviceUserId();
+    set({
+      userId: deviceId,
+      currentUser: null,
+      authModalOpen: false,
+      pendingAuthAction: null,
+    });
+    await get().refreshData();
+  },
 
   setSearchQuery: (searchQuery) =>
     set((state) => ({ filters: { ...state.filters, searchQuery } })),
@@ -316,17 +635,29 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
 
   resetFilters: () => set({ filters: DEFAULT_FILTERS }),
 
-  /**
-   * Publishes a listing linked to THIS device's unique `userId` as `donorId`
-   */
   addListing: async (input: NewListingInput) => {
-    const { userId } = get();
+    const { userId, currentUser } = get();
+
+    if (!currentUser) {
+      get().setAuthModalOpen(true, () => {
+        get().addListing(input);
+      });
+      return null;
+    }
+
+    const capKg = currentUser.maxWeightCapKg;
+    if (!currentUser.verifiedStore && input.weightKg > capKg) {
+      const msg = `Unverified Community Donor limit is ${capKg} kg. Verify your store badge to publish up to 50 kg.`;
+      set({ error: msg });
+      throw new Error(msg);
+    }
+
     const now = Date.now();
     const { co2SavedKg, estimatedMeals } = calculateListingImpact(input.weightKg);
 
     const newListing: SurplusListing = {
       id: `lst-${now.toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-      donorId: userId, // <-- Tied to this Store Partner phone!
+      donorId: userId,
       donorName: input.donorName.trim(),
       donorType: input.donorType,
       title: input.title.trim(),
@@ -359,15 +690,19 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
 
     await db.listings.put(newListing);
     await get().refreshData();
-    set({ activeTab: 'browse' });
+    set({ activeTab: 'browse', error: null });
     return newListing;
   },
 
-  /**
-   * Claims a listing linked to THIS consumer device's unique `userId` as `receiverId`
-   */
   claimListing: async (listingId: string, consumerName?: string) => {
-    const { userId, userName, activeRole } = get();
+    const { userId, userName, activeRole, currentUser } = get();
+
+    if (!currentUser) {
+      get().setAuthModalOpen(true, () => {
+        get().claimListing(listingId, consumerName);
+      });
+      return null;
+    }
 
     if (activeRole === 'donor') {
       set({ error: 'Switch to Consumer Mode to claim surplus food.' });
@@ -375,7 +710,10 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
     }
 
     const claimant =
-      consumerName?.trim() || userName.trim() || 'Community Consumer';
+      consumerName?.trim() ||
+      currentUser.displayName ||
+      userName.trim() ||
+      'Community Consumer';
     const now = Date.now();
     const pickupCode = generatePickupCode();
 
@@ -394,7 +732,7 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
         listingId: target.id,
         listingTitle: target.title,
         donorName: target.donorName,
-        receiverId: userId, // <-- Tied strictly to this Consumer's phone!
+        receiverId: userId,
         receiverName: claimant,
         claimedAt: now,
         pickupCode,
@@ -453,10 +791,24 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
   verifyPickupCode: async (claimId: string, enteredCode: string) => {
     const normalizedInput = enteredCode.trim().toUpperCase();
     const now = Date.now();
+    const { userId, userName, listings } = get();
 
     try {
       const claim = get().claims.find((c) => c.id === claimId);
       if (!claim) return false;
+
+      const parentListing = listings.find((l) => l.id === claim.listingId);
+      const isStoreOwner =
+        parentListing &&
+        (parentListing.donorId === userId ||
+          (userName.trim() !== '' &&
+            parentListing.donorName.toLowerCase() ===
+              userName.trim().toLowerCase()));
+
+      if (!isStoreOwner) {
+        set({ error: 'Only the store that created this listing can verify pickup QR/codes.' });
+        return false;
+      }
 
       if (claim.pickupCode.toUpperCase() !== normalizedInput) {
         return false;
@@ -538,7 +890,20 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
   },
 
   deleteOrReportListing: async (listingId: string) => {
+    const { userId, userName, listings } = get();
     try {
+      const target = listings.find((l) => l.id === listingId);
+      const isOwner =
+        target &&
+        (target.donorId === userId ||
+          (userName.trim() !== '' &&
+            target.donorName.toLowerCase() === userName.trim().toLowerCase()));
+
+      if (!isOwner) {
+        set({ error: 'Only the store owner who published this listing can delete it.' });
+        return;
+      }
+
       if (supabase && isCloudConfigured) {
         await supabase.from('listings').delete().eq('id', listingId);
       }
@@ -549,17 +914,11 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
     }
   },
 
-  /**
-   * Returns only claims made by THIS Consumer device
-   */
   getMyConsumerClaims: () => {
     const { claims, userId } = get();
     return claims.filter((c) => c.receiverId === userId);
   },
 
-  /**
-   * Returns only claims placed on listings owned by THIS Store Partner device
-   */
   getIncomingStoreClaims: () => {
     const { claims, listings, userId, userName } = get();
     const myStoreListingIds = new Set(
@@ -576,44 +935,52 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
   },
 
   getFilteredListings: () => {
-    const { listings, filters } = get();
+    const { listings, filters, verifiedDonorIds } = get();
     const now = Date.now();
+    const verifiedSet = new Set(verifiedDonorIds);
 
-    return listings.filter((item) => {
-      if (item.status !== 'available' || item.expiresAt <= now) return false;
+    return listings
+      .filter((item) => {
+        if (item.status !== 'available' || item.expiresAt <= now) return false;
 
-      if (filters.category !== 'all' && item.category !== filters.category) {
-        return false;
-      }
-
-      if (filters.dietaryTags.length > 0) {
-        const hasAllTags = filters.dietaryTags.every((tag) =>
-          item.dietaryTags.includes(tag)
-        );
-        if (!hasAllTags) return false;
-      }
-
-      if (filters.searchQuery.trim() !== '') {
-        const q = filters.searchQuery.toLowerCase();
-        const matchTitle = item.title.toLowerCase().includes(q);
-        const matchDonor = item.donorName.toLowerCase().includes(q);
-        const matchNeighborhood = item.location.neighborhood
-          .toLowerCase()
-          .includes(q);
-        const matchAddress = item.location.address.toLowerCase().includes(q);
-        const matchDesc = item.description.toLowerCase().includes(q);
-        if (
-          !matchTitle &&
-          !matchDonor &&
-          !matchNeighborhood &&
-          !matchAddress &&
-          !matchDesc
-        ) {
+        if (filters.category !== 'all' && item.category !== filters.category) {
           return false;
         }
-      }
 
-      return true;
-    });
+        if (filters.dietaryTags.length > 0) {
+          const hasAllTags = filters.dietaryTags.every((tag) =>
+            item.dietaryTags.includes(tag)
+          );
+          if (!hasAllTags) return false;
+        }
+
+        if (filters.searchQuery.trim() !== '') {
+          const q = filters.searchQuery.toLowerCase();
+          const matchTitle = item.title.toLowerCase().includes(q);
+          const matchDonor = item.donorName.toLowerCase().includes(q);
+          const matchNeighborhood = item.location.neighborhood
+            .toLowerCase()
+            .includes(q);
+          const matchAddress = item.location.address.toLowerCase().includes(q);
+          const matchDesc = item.description.toLowerCase().includes(q);
+          if (
+            !matchTitle &&
+            !matchDonor &&
+            !matchNeighborhood &&
+            !matchAddress &&
+            !matchDesc
+          ) {
+            return false;
+          }
+        }
+
+        return true;
+      })
+      .sort((a, b) => {
+        const aVer = verifiedSet.has(a.donorId) ? 1 : 0;
+        const bVer = verifiedSet.has(b.donorId) ? 1 : 0;
+        if (aVer !== bVer) return bVer - aVer;
+        return a.expiresAt - b.expiresAt;
+      });
   },
 }));
