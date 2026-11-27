@@ -1,6 +1,6 @@
 // src/lib/supabase.ts
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import type { SurplusListing, ClaimRecord } from '../types';
+import type { SurplusListing, ClaimRecord, AccountProfile, UserRole } from '../types';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
@@ -14,6 +14,11 @@ export const isCloudConfigured = Boolean(
 
 export const supabase: SupabaseClient | null = isCloudConfigured
   ? createClient(supabaseUrl!, supabaseAnonKey!, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+      },
       realtime: {
         params: {
           eventsPerSecond: 10,
@@ -21,6 +26,35 @@ export const supabase: SupabaseClient | null = isCloudConfigured
       },
     })
   : null;
+
+export function mapRowToProfile(
+  row: Record<string, any>,
+  authMode: 'supabase' | 'demo' = 'supabase'
+): AccountProfile {
+  const verifiedStore = Boolean(row.verified_store);
+  return {
+    id: String(row.id),
+    email: String(row.email || ''),
+    displayName: String(row.display_name || 'EcoLoop User'),
+    role: (row.role as UserRole) || 'receiver',
+    verifiedStore,
+    businessRegCode: row.business_reg_code ?? undefined,
+    maxWeightCapKg: verifiedStore ? 50 : 5,
+    authMode,
+  };
+}
+
+export function mapProfileToRow(profile: AccountProfile) {
+  return {
+    id: profile.id,
+    email: profile.email,
+    display_name: profile.displayName,
+    role: profile.role,
+    verified_store: profile.verifiedStore,
+    business_reg_code: profile.businessRegCode ?? null,
+    updated_at: new Date().toISOString(),
+  };
+}
 
 /**
  * Maps a PostgreSQL `listings` row to our TypeScript `SurplusListing` interface
