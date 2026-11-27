@@ -1,5 +1,5 @@
 // src/components/dashboard/PostListingForm.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   PlusCircle,
   Leaf,
@@ -69,9 +69,16 @@ export const PostListingForm: React.FC = () => {
   const [isUploadingImage, setIsUploadingImage] = useState(false);
 
   // Real Location State for the Store
-  const [coords, setCoords] = useState<Coordinates | null>(userLocation);
-  const [address, setAddress] = useState('');
-  const [neighborhood, setNeighborhood] = useState('');
+  const [coordsOverride, setCoordsOverride] = useState<Coordinates | null>(null);
+  const [addressOverride, setAddressOverride] = useState<string | null>(null);
+  const [neighborhoodOverride, setNeighborhoodOverride] = useState<string | null>(null);
+  const hasUserLocation =
+    userLocation !== null &&
+    (userLocation.lat !== 0 || userLocation.lng !== 0);
+  const coords = coordsOverride ?? userLocation;
+  const address = addressOverride ?? (hasUserLocation ? locationLabel : '');
+  const neighborhood =
+    neighborhoodOverride ?? (hasUserLocation ? locationLabel : '');
   const [addressSearchQuery, setAddressSearchQuery] = useState('');
   const [isLocating, setIsLocating] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -93,14 +100,6 @@ export const PostListingForm: React.FC = () => {
     }
   };
 
-  useEffect(() => {
-    if (userLocation && (userLocation.lat !== 0 || userLocation.lng !== 0)) {
-      setCoords(userLocation);
-      if (!neighborhood) setNeighborhood(locationLabel);
-      if (!address) setAddress(locationLabel);
-    }
-  }, [userLocation, locationLabel]);
-
   const previewWeight = Math.min(50, Math.max(0, parseFloat(weightInput) || 0));
   const { co2SavedKg, estimatedMeals } = calculateListingImpact(previewWeight);
 
@@ -110,9 +109,9 @@ export const PostListingForm: React.FC = () => {
     try {
       const liveCoords = await requestBrowserGps();
       const resolved = await reverseGeocode(liveCoords);
-      setCoords({ lat: resolved.lat, lng: resolved.lng });
-      setAddress(resolved.displayName);
-      setNeighborhood(resolved.cityOrArea);
+      setCoordsOverride({ lat: resolved.lat, lng: resolved.lng });
+      setAddressOverride(resolved.displayName);
+      setNeighborhoodOverride(resolved.cityOrArea);
     } catch (err) {
       setFormError(
         err instanceof Error
@@ -138,9 +137,9 @@ export const PostListingForm: React.FC = () => {
       return;
     }
 
-    setCoords({ lat: result.lat, lng: result.lng });
-    setAddress(result.displayName);
-    setNeighborhood(result.cityOrArea);
+    setCoordsOverride({ lat: result.lat, lng: result.lng });
+    setAddressOverride(result.displayName);
+    setNeighborhoodOverride(result.cityOrArea);
   };
 
   const toggleTag = (tag: DietaryTag) => {
@@ -477,7 +476,7 @@ export const PostListingForm: React.FC = () => {
               required
               placeholder="Street address & building number"
               value={address}
-              onChange={(e) => setAddress(e.target.value)}
+              onChange={(e) => setAddressOverride(e.target.value)}
               className="w-full rounded-xl bg-black/40 border border-white/15 px-3 py-2 text-xs text-white"
             />
           </div>
@@ -490,7 +489,7 @@ export const PostListingForm: React.FC = () => {
               required
               placeholder="City or district"
               value={neighborhood}
-              onChange={(e) => setNeighborhood(e.target.value)}
+              onChange={(e) => setNeighborhoodOverride(e.target.value)}
               className="w-full rounded-xl bg-black/40 border border-white/15 px-3 py-2 text-xs text-white"
             />
           </div>

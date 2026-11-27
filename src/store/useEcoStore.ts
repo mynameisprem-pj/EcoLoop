@@ -466,6 +466,7 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
       email: cleanEmail,
       password,
     });
+    let user = data.user;
 
     if (error) {
       const signUpRes = await supabase.auth.signUp({
@@ -474,12 +475,12 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
         options: { data: { full_name: cleanName } },
       });
       if (signUpRes.error) throw new Error(signUpRes.error.message);
-      data = signUpRes.data;
+      user = signUpRes.data.user;
     }
 
-    if (data.user) {
+    if (user) {
       await hydrateProfileFromCloud(
-        data.user.id,
+        user.id,
         cleanEmail,
         cleanName,
         get().activeRole,

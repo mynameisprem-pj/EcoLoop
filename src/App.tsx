@@ -1,5 +1,12 @@
 // src/App.tsx
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, {
+  Suspense,
+  lazy,
+  useEffect,
+  useState,
+  useMemo,
+  useCallback,
+} from 'react';
 import {
   MapPin,
   Home,
@@ -15,10 +22,6 @@ import {
 } from 'lucide-react';
 import { useEcoStore } from './store/useEcoStore';
 import { SurplusCard } from './components/dashboard/SurplusCard';
-import { LiveStreetMap } from './components/dashboard/LiveStreetMap';
-import { PostListingForm } from './components/dashboard/PostListingForm';
-import { MyClaimsView } from './components/dashboard/MyClaimsView';
-import { ImpactAnalyticsView } from './components/analytics/ImpactAnalyticsView';
 import { QrHandoffModal } from './components/modals/QrHandoffModal';
 import { AuthModal } from './components/auth/AuthModal';
 import { EcoLoopLogo } from './components/common/EcoLoopLogo';
@@ -29,6 +32,27 @@ import {
   calculateDistanceKm,
 } from './utils/geoUtils';
 import type { FoodCategory, SurplusListing } from './types';
+
+const LiveStreetMap = lazy(() =>
+  import('./components/dashboard/LiveStreetMap').then((module) => ({
+    default: module.LiveStreetMap,
+  }))
+);
+const PostListingForm = lazy(() =>
+  import('./components/dashboard/PostListingForm').then((module) => ({
+    default: module.PostListingForm,
+  }))
+);
+const MyClaimsView = lazy(() =>
+  import('./components/dashboard/MyClaimsView').then((module) => ({
+    default: module.MyClaimsView,
+  }))
+);
+const ImpactAnalyticsView = lazy(() =>
+  import('./components/analytics/ImpactAnalyticsView').then((module) => ({
+    default: module.ImpactAnalyticsView,
+  }))
+);
 
 const DEFAULT_COORDS = { lat: 27.7172, lng: 85.324 };
 
@@ -60,12 +84,11 @@ export function App() {
   } = useEcoStore();
 
   const [viewMode, setViewMode] = useState<'listings' | 'map'>('listings');
-  const [isLocating, setIsLocating] = useState<boolean>(false);
+  const [isLocating, setIsLocating] = useState<boolean>(true);
   const [showLocationPicker, setShowLocationPicker] = useState<boolean>(false);
   const [customCityQuery, setCustomCityQuery] = useState<string>('');
 
   const detectLiveGpsLocation = useCallback(async () => {
-    setIsLocating(true);
     try {
       const coords = await requestBrowserGps();
       const resolved = await reverseGeocode(coords);
@@ -79,13 +102,13 @@ export function App() {
       setLocationError(
         err instanceof Error ? err.message : 'Location permission needed'
       );
-      if (!userLocation) {
+      if (!useEcoStore.getState().userLocation) {
         setUserLocation(DEFAULT_COORDS, 'Set Location');
       }
     } finally {
       setIsLocating(false);
     }
-  }, [setUserLocation, setLocationError, userLocation]);
+  }, [setUserLocation, setLocationError]);
 
   useEffect(() => {
     initializeStore();
@@ -95,7 +118,7 @@ export function App() {
       sweepExpiredListings();
     }, 10000);
     return () => clearInterval(sweepTimer);
-  }, [initializeStore, sweepExpiredListings]);
+  }, [initializeStore, sweepExpiredListings, detectLiveGpsLocation]);
 
   const handleManualLocationSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -231,6 +254,7 @@ export function App() {
                   <button
                     type="button"
                     onClick={() => {
+                      setIsLocating(true);
                       detectLiveGpsLocation();
                       setShowLocationPicker(false);
                     }}
@@ -469,14 +493,16 @@ export function App() {
                   viewMode === 'listings' ? 'hidden lg:block' : 'block'
                 }`}
               >
-                <LiveStreetMap
-                  listings={liveListings}
-                  userLocation={activeMapCenter}
-                  trackedListing={trackedListing}
-                  onClearTracking={() => setTrackedListing(null)}
-                  onClaim={handleRescueClaim}
-                  isVisible={viewMode === 'map'}
-                />
+                <Suspense fallback={null}>
+                  <LiveStreetMap
+                    listings={liveListings}
+                    userLocation={activeMapCenter}
+                    trackedListing={trackedListing}
+                    onClearTracking={() => setTrackedListing(null)}
+                    onClaim={handleRescueClaim}
+                    isVisible={viewMode === 'map'}
+                  />
+                </Suspense>
               </div>
             </div>
           </div>
@@ -484,19 +510,25 @@ export function App() {
 
         {activeTab === 'post' && (
           <div className="max-w-2xl mx-auto">
-            <PostListingForm />
+            <Suspense fallback={null}>
+              <PostListingForm />
+            </Suspense>
           </div>
         )}
 
         {activeTab === 'claims' && (
           <div className="max-w-3xl mx-auto">
-            <MyClaimsView onTrackClaimedListing={handleTrackListingOnMap} />
+            <Suspense fallback={null}>
+              <MyClaimsView onTrackClaimedListing={handleTrackListingOnMap} />
+            </Suspense>
           </div>
         )}
 
         {activeTab === 'analytics' && (
           <div className="max-w-4xl mx-auto">
-            <ImpactAnalyticsView />
+            <Suspense fallback={null}>
+              <ImpactAnalyticsView />
+            </Suspense>
           </div>
         )}
       </main>

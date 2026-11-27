@@ -1,7 +1,7 @@
 // src/components/modals/QrHandoffModal.tsx
 import React, { useState, useEffect, useRef } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { Html5Qrcode } from 'html5-qrcode';
+import type { Html5Qrcode } from 'html5-qrcode';
 import {
   X,
   CheckCircle2,
@@ -30,13 +30,7 @@ export const QrHandoffModal: React.FC = () => {
 
   const isStorePartner = activeRole === 'donor';
 
-  useEffect(() => {
-    return () => {
-      stopCameraScanner();
-    };
-  }, [selectedClaimForModal]);
-
-  const stopCameraScanner = async () => {
+  async function stopCameraScanner() {
     if (scannerRef.current) {
       try {
         if (scannerRef.current.isScanning) {
@@ -49,7 +43,13 @@ export const QrHandoffModal: React.FC = () => {
       scannerRef.current = null;
     }
     setIsCameraActive(false);
-  };
+  }
+
+  useEffect(() => {
+    return () => {
+      stopCameraScanner();
+    };
+  }, [selectedClaimForModal]);
 
   const startCameraScanner = async () => {
     if (!selectedClaimForModal) return;
@@ -58,6 +58,7 @@ export const QrHandoffModal: React.FC = () => {
 
     setTimeout(async () => {
       try {
+        const { Html5Qrcode } = await import('html5-qrcode');
         const html5QrCode = new Html5Qrcode('ecoloop-qr-reader');
         scannerRef.current = html5QrCode;
 

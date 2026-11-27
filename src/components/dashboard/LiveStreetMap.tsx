@@ -37,30 +37,55 @@ export const LiveStreetMap: React.FC<LiveStreetMapProps> = ({
   const { activeRole, userId, setActiveTab } = useEcoStore();
   const isStorePartner = activeRole === 'donor';
 
-  const [selectedListing, setSelectedListing] = useState<SurplusListing | null>(
-    trackedListing || listings[0] || null
-  );
+  const [selectionState, setSelectionState] = useState(() => ({
+    trackedListing,
+    listings,
+    isStorePartner,
+    selectedListing: trackedListing || listings[0] || null,
+    isRoutingInApp: Boolean(trackedListing) && !isStorePartner,
+  }));
+  if (
+    selectionState.trackedListing !== trackedListing ||
+    selectionState.listings !== listings ||
+    selectionState.isStorePartner !== isStorePartner ||
+    (!selectionState.selectedListing && listings.length > 0)
+  ) {
+    setSelectionState((previous) => ({
+      trackedListing,
+      listings,
+      isStorePartner,
+      selectedListing:
+        trackedListing || previous.selectedListing || listings[0] || null,
+      isRoutingInApp:
+        trackedListing && !isStorePartner
+          ? true
+          : previous.isRoutingInApp,
+    }));
+  }
+  const { selectedListing, isRoutingInApp } = selectionState;
   const [mapType, setMapType] = useState<'m' | 'k'>('m');
-  const [isRoutingInApp, setIsRoutingInApp] = useState<boolean>(
-    Boolean(trackedListing) && !isStorePartner
-  );
-  const [liveHumanCoords, setLiveHumanCoords] =
-    useState<Coordinates>(userLocation);
+  const [livePosition, setLivePosition] = useState({
+    source: userLocation,
+    coordinates: userLocation,
+  });
+  const liveHumanCoords =
+    livePosition.source === userLocation || !isValidCoordinate(userLocation)
+      ? livePosition.coordinates
+      : userLocation;
 
-  useEffect(() => {
-    if (isValidCoordinate(userLocation)) {
-      setLiveHumanCoords(userLocation);
-    }
-  }, [userLocation]);
+  const activeTarget = trackedListing || selectedListing || listings[0] || null;
 
   useEffect(() => {
     if (!('geolocation' in navigator) || !isRoutingInApp || isStorePartner) return;
 
     const watchId = navigator.geolocation.watchPosition(
       (pos) => {
-        setLiveHumanCoords({
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
+        setLivePosition({
+          source: userLocation,
+          coordinates: {
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+          },
         });
       },
       () => {},
@@ -68,20 +93,7 @@ export const LiveStreetMap: React.FC<LiveStreetMapProps> = ({
     );
 
     return () => navigator.geolocation.clearWatch(watchId);
-  }, [isRoutingInApp, isStorePartner]);
-
-  useEffect(() => {
-    if (trackedListing) {
-      setSelectedListing(trackedListing);
-      if (!isStorePartner) {
-        setIsRoutingInApp(true);
-      }
-    } else if (!selectedListing && listings.length > 0) {
-      setSelectedListing(listings[0]);
-    }
-  }, [trackedListing, listings, isStorePartner]);
-
-  const activeTarget = trackedListing || selectedListing;
+  }, [isRoutingInApp, isStorePartner, userLocation]);
 
   const targetLat =
     activeTarget && isValidCoordinate(activeTarget.location)
@@ -178,8 +190,13 @@ export const LiveStreetMap: React.FC<LiveStreetMapProps> = ({
                 type="button"
                 onClick={() => {
                   if (onClearTracking) onClearTracking();
-                  setSelectedListing(item);
-                  if (!isStorePartner) setIsRoutingInApp(true);
+                  setSelectionState((previous) => ({
+                    ...previous,
+                    selectedListing: item,
+                    isRoutingInApp: isStorePartner
+                      ? previous.isRoutingInApp
+                      : true,
+                  }));
                 }}
                 className={`px-2.5 py-1 rounded-xl text-xs font-semibold shrink-0 flex items-center gap-1.5 border transition-all cursor-pointer ${
                   isSelected
@@ -241,8 +258,13 @@ export const LiveStreetMap: React.FC<LiveStreetMapProps> = ({
               type="button"
               onClick={() => {
                 const nextState = !isRoutingInApp;
-                setIsRoutingInApp(nextState);
-                if (!nextState && onClearTracking) onClearTracking();
+                setSelectionState((previous) => ({
+                  ...previous,
+                  isRoutingInApp: nextState,
+                }));
+                if (!nextState) {
+                  if (onClearTracking) onClearTracking();
+                }
               }}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
                 isRoutingInApp
