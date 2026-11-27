@@ -2,25 +2,38 @@
 
 export type UserRole = 'donor' | 'receiver';
 
-export type FoodCategory = 
+export type FoodCategory =
   | 'bakery'
   | 'produce'
   | 'prepared_meals'
   | 'dairy'
   | 'pantry';
 
-export type ListingStatus = 
+export type ListingStatus =
   | 'available'
   | 'claimed'
   | 'completed'
   | 'expired';
 
-export type DietaryTag = 
+export type DietaryTag =
   | 'vegan'
   | 'vegetarian'
   | 'gluten_free'
   | 'halal'
   | 'nut_free';
+
+export type AuthProviderMode = 'supabase' | 'demo';
+
+export interface AccountProfile {
+  id: string;
+  email: string;
+  displayName: string;
+  role: UserRole;
+  verifiedStore: boolean;
+  businessRegCode?: string;
+  maxWeightCapKg: number;
+  authMode: AuthProviderMode;
+}
 
 export interface GeoLocation {
   lat: number;
@@ -39,7 +52,6 @@ export interface DonorProfile {
   location: GeoLocation;
 }
 
-// Inside src/types/index.ts -> interface SurplusListing
 export interface SurplusListing {
   id: string;
   donorId: string;
@@ -58,7 +70,7 @@ export interface SurplusListing {
   location: GeoLocation;
   status: ListingStatus;
   storageRequirement: 'ambient' | 'refrigerated' | 'frozen';
-  imageUrl?: string;              // <-- Real food photo (compressed WebP/JPEG)
+  imageUrl?: string;
   claimedById?: string;
   claimedByName?: string;
   claimedAt?: number;
@@ -91,6 +103,6 @@ export interface ImpactMetrics {
 
 // Environmental Conversion Constants (FAO / EPA Standard Approximations)
 export const IMPACT_CONSTANTS = {
-  CO2_KG_PER_FOOD_KG: 2.5,      // 1 kg of landfill food waste prevented = 2.5 kg CO2e saved
-  KG_PER_STANDARD_MEAL: 0.45,   // ~450g per standard nutritious meal
+  CO2_KG_PER_FOOD_KG: 2.5,
+  KG_PER_STANDARD_MEAL: 0.45,
 } as const;
