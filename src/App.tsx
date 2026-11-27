@@ -1,5 +1,5 @@
 // src/App.tsx
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   MapPin,
   Home,
@@ -11,6 +11,7 @@ import {
   LocateFixed,
   Store,
   ShoppingBag,
+  UserCheck,
 } from 'lucide-react';
 import { useEcoStore } from './store/useEcoStore';
 import { SurplusCard } from './components/dashboard/SurplusCard';
@@ -19,6 +20,7 @@ import { PostListingForm } from './components/dashboard/PostListingForm';
 import { MyClaimsView } from './components/dashboard/MyClaimsView';
 import { ImpactAnalyticsView } from './components/analytics/ImpactAnalyticsView';
 import { QrHandoffModal } from './components/modals/QrHandoffModal';
+import { AuthModal } from './components/auth/AuthModal';
 import { EcoLoopLogo } from './components/common/EcoLoopLogo';
 import {
   requestBrowserGps,
@@ -27,6 +29,8 @@ import {
   calculateDistanceKm,
 } from './utils/geoUtils';
 import type { FoodCategory, SurplusListing } from './types';
+
+const DEFAULT_COORDS = { lat: 27.7172, lng: 85.324 };
 
 export function App() {
   const {
@@ -39,6 +43,8 @@ export function App() {
     setTrackedListing,
     activeRole,
     setActiveRole,
+    currentUser,
+    setAuthModalOpen,
     userLocation,
     locationLabel,
     setUserLocation,
@@ -58,6 +64,29 @@ export function App() {
   const [showLocationPicker, setShowLocationPicker] = useState<boolean>(false);
   const [customCityQuery, setCustomCityQuery] = useState<string>('');
 
+  const detectLiveGpsLocation = useCallback(async () => {
+    setIsLocating(true);
+    try {
+      const coords = await requestBrowserGps();
+      const resolved = await reverseGeocode(coords);
+      const cleanLabel =
+        resolved.cityOrArea && resolved.cityOrArea !== 'Unknown'
+          ? resolved.cityOrArea
+          : `${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)}`;
+      setUserLocation({ lat: coords.lat, lng: coords.lng }, cleanLabel);
+      setLocationError(null);
+    } catch (err) {
+      setLocationError(
+        err instanceof Error ? err.message : 'Location permission needed'
+      );
+      if (!userLocation) {
+        setUserLocation(DEFAULT_COORDS, 'Set Location');
+      }
+    } finally {
+      setIsLocating(false);
+    }
+  }, [setUserLocation, setLocationError, userLocation]);
+
   useEffect(() => {
     initializeStore();
     detectLiveGpsLocation();
@@ -66,39 +95,16 @@ export function App() {
       sweepExpiredListings();
     }, 10000);
     return () => clearInterval(sweepTimer);
-  }, []);
-
-  const detectLiveGpsLocation = async () => {
-    setIsLocating(true);
-    try {
-      const coords = await requestBrowserGps();
-      const resolved = await reverseGeocode(coords);
-      setUserLocation(
-        { lat: resolved.lat, lng: resolved.lng },
-        resolved.cityOrArea
-      );
-    } catch (err) {
-      setLocationError(
-        err instanceof Error ? err.message : 'Location permission needed'
-      );
-      // Default fallback to central Nepal coordinates if GPS permission denied
-      setUserLocation({ lat: 27.7172, lng: 85.324 }, 'Set Location');
-    } finally {
-      setIsLocating(false);
-    }
-  };
+  }, [initializeStore, sweepExpiredListings]);
 
   const handleManualLocationSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!customCityQuery.trim()) return;
     setIsLocating(true);
-    const result = await searchAddressCoordinates(customCityQuery);
+    const result = await searchAddressCoordinates(customCityQuery.trim());
     setIsLocating(false);
     if (result) {
-      setUserLocation(
-        { lat: result.lat, lng: result.lng },
-        result.cityOrArea
-      );
+      setUserLocation({ lat: result.lat, lng: result.lng }, result.cityOrArea);
       setShowLocationPicker(false);
       setCustomCityQuery('');
     }
@@ -144,7 +150,6 @@ export function App() {
     }
   };
 
-  // Triggered when user clicks the distance button on any SurplusCard
   const handleTrackListingOnMap = (listing: SurplusListing) => {
     setTrackedListing(listing);
     setActiveTab('browse');
@@ -161,14 +166,14 @@ export function App() {
         lng: liveListings[0].location.lng,
       };
     }
-    return { lat: 27.7172, lng: 85.324 };
+    return DEFAULT_COORDS;
   }, [userLocation, liveListings]);
 
   if (!isInitialized) {
     return (
       <div className="min-h-screen bg-[#061411] text-white flex items-center justify-center p-4">
         <div className="flex items-center gap-3 text-emerald-400 font-semibold text-sm">
-          <EcoLoopLogo size={32} />
+          <EcoLoopLogo size={32} className="w-8 h-8" />
           <span>Loading EcoLoop...</span>
         </div>
       </div>
@@ -176,31 +181,29 @@ export function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#07221B] via-[#081514] to-[#090D16] text-slate-100 pb-24 lg:pb-12">
+    <div className="min-h-screen bg-gradient-to-b from-[#07221B] via-[#081514] to-[#090D16] text-slate-100 pb-24 lg:pb-12 overflow-x-hidden">
       <div className="fixed top-0 right-0 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
 
-      {/* Clean, Single-Line Responsive Topbar */}
+      {/* 320px-Safe Single-Line Topbar */}
       <header className="sticky top-0 z-30 bg-[#071A15]/95 backdrop-blur-xl border-b border-white/10">
-        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-14 sm:h-16 flex items-center justify-between gap-2">
-          {/* Left: Clean Brand Logo + Tiny Live Dot */}
-          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+        <div className="max-w-7xl mx-auto px-2.5 sm:px-6 lg:px-8 h-14 sm:h-16 flex items-center justify-between gap-1.5 sm:gap-2">
+          {/* Left: Brand + Location */}
+          <div className="flex items-center gap-1.5 sm:gap-3 min-w-0">
             <button
               type="button"
               onClick={() => {
                 setActiveTab('browse');
                 setViewMode('listings');
               }}
-              className="flex items-center gap-2 text-left cursor-pointer shrink-0"
+              className="flex items-center gap-1.5 sm:gap-2 text-left cursor-pointer shrink-0"
             >
-              <EcoLoopLogo size={32} className="w-8 h-8" />
-              <div className="flex items-center gap-1.5">
-                <span className="text-lg sm:text-xl font-extrabold tracking-tight text-white">
+              <EcoLoopLogo size={28} className="w-7 h-7 sm:w-8 sm:h-8" />
+              <div className="flex items-center gap-1">
+                <span className="text-base sm:text-xl font-extrabold tracking-tight text-white">
                   Eco<span className="text-emerald-400">Loop</span>
                 </span>
                 <span
-                  title={
-                    isLiveConnected ? 'Live Cloud Connected' : 'Offline Mode'
-                  }
+                  title={isLiveConnected ? 'Live Cloud Connected' : 'Offline Mode'}
                   className={`w-2 h-2 rounded-full shrink-0 ${
                     isLiveConnected ? 'bg-emerald-400' : 'bg-amber-400'
                   }`}
@@ -208,17 +211,14 @@ export function App() {
               </div>
             </button>
 
-            {/* Compact Location Pill */}
-            <div className="relative">
+            <div className="relative min-w-0">
               <button
                 type="button"
                 onClick={() => setShowLocationPicker((prev) => !prev)}
-                className="inline-flex items-center gap-1 text-xs font-medium text-slate-200 bg-white/5 hover:bg-white/10 border border-white/10 px-2.5 py-1.5 rounded-full transition-colors cursor-pointer"
+                className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-medium text-slate-200 bg-white/5 hover:bg-white/10 border border-white/10 px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-full transition-colors cursor-pointer max-w-[96px] sm:max-w-[160px]"
               >
-                <MapPin className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                <span className="max-w-[95px] sm:max-w-[160px] truncate">
-                  {locationLabel}
-                </span>
+                <MapPin className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-emerald-400 shrink-0" />
+                <span className="truncate">{locationLabel}</span>
                 <LocateFixed
                   className={`w-3 h-3 text-emerald-400 shrink-0 ${
                     isLocating ? 'animate-spin' : ''
@@ -247,11 +247,11 @@ export function App() {
                       placeholder="Search city or street..."
                       value={customCityQuery}
                       onChange={(e) => setCustomCityQuery(e.target.value)}
-                      className="flex-1 rounded-xl bg-black/50 border border-white/15 px-2.5 py-1.5 text-xs text-white placeholder-slate-400 focus:border-emerald-400 focus:outline-none"
+                      className="flex-1 min-w-0 rounded-xl bg-black/50 border border-white/15 px-2.5 py-1.5 text-xs text-white placeholder-slate-400 focus:border-emerald-400 focus:outline-none"
                     />
                     <button
                       type="submit"
-                      className="px-3 py-1.5 rounded-xl bg-emerald-500 text-slate-950 text-xs font-bold cursor-pointer"
+                      className="px-3 py-1.5 rounded-xl bg-emerald-500 text-slate-950 text-xs font-bold shrink-0 cursor-pointer"
                     >
                       Set
                     </button>
@@ -320,36 +320,50 @@ export function App() {
             )}
           </nav>
 
-          {/* Right: Clean Role Toggle */}
-          <button
-            type="button"
-            onClick={() =>
-              setActiveRole(activeRole === 'donor' ? 'receiver' : 'donor')
-            }
-            className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-400/40 text-xs font-bold text-emerald-300 transition-all cursor-pointer shrink-0"
-          >
-            {activeRole === 'donor' ? (
-              <>
-                <Store className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                <span>Store</span>
-              </>
-            ) : (
-              <>
-                <ShoppingBag className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                <span>Consumer</span>
-              </>
-            )}
-          </button>
+          {/* Right: Role Switch + Account */}
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              onClick={() =>
+                setActiveRole(activeRole === 'donor' ? 'receiver' : 'donor')
+              }
+              className="inline-flex items-center gap-1 px-2 py-1 sm:px-3 sm:py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-400/40 text-[11px] sm:text-xs font-bold text-emerald-300 transition-all cursor-pointer shrink-0"
+            >
+              {activeRole === 'donor' ? (
+                <>
+                  <Store className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-emerald-400 shrink-0" />
+                  <span>Store</span>
+                </>
+              ) : (
+                <>
+                  <ShoppingBag className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-emerald-400 shrink-0" />
+                  <span className="hidden sm:inline">Consumer</span>
+                  <span className="sm:hidden">Shop</span>
+                </>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setAuthModalOpen(true)}
+              className="inline-flex items-center gap-1 px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-[11px] sm:text-xs font-semibold text-white cursor-pointer shrink-0"
+              title={currentUser ? currentUser.displayName : 'Sign In'}
+            >
+              <UserCheck className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-emerald-400 shrink-0" />
+              <span className="hidden md:inline">
+                {currentUser ? currentUser.displayName.split(' ')[0] : 'Sign In'}
+              </span>
+            </button>
+          </div>
         </div>
       </header>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6">
+      <main className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 pt-4 sm:pt-6">
         {activeTab === 'browse' && (
           <div className="space-y-4">
-            {/* Search & Category Filters */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-[#101B18]/85 border border-emerald-500/25 p-3 rounded-2xl backdrop-blur-xl">
-              <div className="relative flex-1">
+              <div className="relative flex-1 min-w-0">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
@@ -387,7 +401,6 @@ export function App() {
               </div>
             </div>
 
-            {/* Mobile Toggle: Listings vs Live Map */}
             <div className="grid grid-cols-2 p-1 rounded-full bg-[#111C19]/90 border border-white/15 lg:hidden">
               <button
                 type="button"
@@ -413,10 +426,9 @@ export function App() {
               </button>
             </div>
 
-            {/* Responsive Split View */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
               <div
-                className={`lg:col-span-7 space-y-3.5 ${
+                className={`lg:col-span-7 space-y-3.5 min-w-0 ${
                   viewMode === 'map' ? 'hidden lg:block' : 'block'
                 }`}
               >
@@ -453,7 +465,7 @@ export function App() {
               </div>
 
               <div
-                className={`lg:col-span-5 lg:sticky lg:top-24 ${
+                className={`lg:col-span-5 lg:sticky lg:top-24 min-w-0 ${
                   viewMode === 'listings' ? 'hidden lg:block' : 'block'
                 }`}
               >
@@ -490,14 +502,14 @@ export function App() {
       </main>
 
       {/* Mobile Bottom Dock */}
-      <nav className="lg:hidden fixed bottom-4 inset-x-4 max-w-md mx-auto h-16 rounded-3xl bg-[#131D1B]/95 backdrop-blur-2xl border border-white/15 shadow-[0_10px_30px_rgba(0,0,0,0.65)] px-3 flex items-center justify-around z-30">
+      <nav className="lg:hidden fixed bottom-4 inset-x-3 max-w-md mx-auto h-16 rounded-3xl bg-[#131D1B]/95 backdrop-blur-2xl border border-white/15 shadow-[0_10px_30px_rgba(0,0,0,0.65)] px-2 flex items-center justify-around z-30">
         <button
           type="button"
           onClick={() => {
             setActiveTab('browse');
             setViewMode('listings');
           }}
-          className={`flex flex-col items-center justify-center w-14 h-full cursor-pointer ${
+          className={`flex flex-col items-center justify-center flex-1 h-full cursor-pointer ${
             activeTab === 'browse' && viewMode === 'listings'
               ? 'text-emerald-400'
               : 'text-slate-400'
@@ -513,7 +525,7 @@ export function App() {
             setActiveTab('browse');
             setViewMode('map');
           }}
-          className={`flex flex-col items-center justify-center w-14 h-full cursor-pointer ${
+          className={`flex flex-col items-center justify-center flex-1 h-full cursor-pointer ${
             activeTab === 'browse' && viewMode === 'map'
               ? 'text-emerald-400'
               : 'text-slate-400'
@@ -526,7 +538,7 @@ export function App() {
         <button
           type="button"
           onClick={() => setActiveTab('claims')}
-          className={`flex flex-col items-center justify-center w-16 h-full cursor-pointer ${
+          className={`flex flex-col items-center justify-center flex-1 h-full cursor-pointer ${
             activeTab === 'claims' ? 'text-emerald-400' : 'text-slate-400'
           }`}
         >
@@ -546,7 +558,7 @@ export function App() {
         <button
           type="button"
           onClick={() => setActiveTab('analytics')}
-          className={`flex flex-col items-center justify-center w-14 h-full cursor-pointer ${
+          className={`flex flex-col items-center justify-center flex-1 h-full cursor-pointer ${
             activeTab === 'analytics' ? 'text-emerald-400' : 'text-slate-400'
           }`}
         >
@@ -558,7 +570,7 @@ export function App() {
           <button
             type="button"
             onClick={() => setActiveTab('post')}
-            className={`flex flex-col items-center justify-center w-14 h-full cursor-pointer ${
+            className={`flex flex-col items-center justify-center flex-1 h-full cursor-pointer ${
               activeTab === 'post' ? 'text-emerald-400' : 'text-slate-400'
             }`}
           >
@@ -568,6 +580,7 @@ export function App() {
         )}
       </nav>
 
+      <AuthModal />
       <QrHandoffModal />
     </div>
   );
