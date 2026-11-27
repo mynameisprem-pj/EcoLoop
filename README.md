@@ -43,7 +43,7 @@ Every year, roughly one-third of all food produced globally is wasted, contribut
 | **State Management** | Zustand | Reactive store orchestrating cloud & offline state |
 | **Cloud Backend & Realtime** | Supabase (PostgreSQL + Realtime) | Multi-user persistence, optimistic concurrency locking, live WebSocket broadcasts |
 | **Offline Persistence** | Dexie.js (IndexedDB) | Local offline cache & fallback storage engine |
-| **Maps & Geolocation** | Leaflet + React-Leaflet + Nominatim | Interactive dark-mode street maps & real-world address geocoding |
+| **Maps & Geolocation** | Google Map | Interactive street maps & real-world address geocoding |
 | **QR & Camera Hardware** | `qrcode.react` + `html5-qrcode` | ISO QR code generation & live hardware camera barcode scanning |
 
 ---
