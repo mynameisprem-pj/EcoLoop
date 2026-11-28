@@ -34,7 +34,7 @@ export const LiveStreetMap: React.FC<LiveStreetMapProps> = ({
   onClearTracking,
   onClaim,
 }) => {
-  const { activeRole, userId, setActiveTab } = useEcoStore();
+  const { activeRole, userId, currentUser, setActiveTab } = useEcoStore();
   const isStorePartner = activeRole === 'donor';
 
   const [selectionState, setSelectionState] = useState(() => ({
@@ -134,7 +134,9 @@ export const LiveStreetMap: React.FC<LiveStreetMapProps> = ({
       : `https://maps.google.com/maps?q=${targetLat},${targetLng}&t=${mapType}&z=16&ie=UTF8&iwloc=&output=embed`;
 
   const isAlreadyClaimed = activeTarget && activeTarget.status !== 'available';
-  const isOwnStoreItem = activeTarget && activeTarget.donorId === userId;
+  const isOwnStoreItem =
+    activeTarget &&
+    activeTarget.donorId === (currentUser?.id || userId);
 
   return (
     <div className="rounded-2xl overflow-hidden border border-emerald-500/35 bg-[#0D1815] shadow-[0_0_30px_rgba(16,185,129,0.14)] flex flex-col">

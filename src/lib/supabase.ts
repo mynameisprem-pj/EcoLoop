@@ -1,5 +1,6 @@
 // src/lib/supabase.ts
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 import type { SurplusListing, ClaimRecord, AccountProfile, UserRole } from '../types';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
@@ -26,6 +27,127 @@ export const supabase: SupabaseClient | null = isCloudConfigured
       },
     })
   : null;
+
+type RealtimeStatus = 'SUBSCRIBED' | 'CLOSED' | 'CHANNEL_ERROR' | 'TIMED_OUT';
+
+interface RealtimeManager {
+  channel: RealtimeChannel | null;
+  status: RealtimeStatus | null;
+  retryTimer: ReturnType<typeof setTimeout> | null;
+  refreshTimer: ReturnType<typeof setTimeout> | null;
+  pollTimer: ReturnType<typeof setInterval> | null;
+  listenersAttached: boolean;
+  onChange: (() => void) | null;
+  onStatusChange: ((connected: boolean) => void) | null;
+}
+
+declare global {
+  var __ecoLoopRealtimeManager: RealtimeManager | undefined;
+}
+
+function getRealtimeManager(): RealtimeManager {
+  if (!globalThis.__ecoLoopRealtimeManager) {
+    globalThis.__ecoLoopRealtimeManager = {
+      channel: null,
+      status: null,
+      retryTimer: null,
+      refreshTimer: null,
+      pollTimer: null,
+      listenersAttached: false,
+      onChange: null,
+      onStatusChange: null,
+    };
+  }
+  return globalThis.__ecoLoopRealtimeManager;
+}
+
+function scheduleRealtimeReconnect(
+  manager: RealtimeManager,
+  channel: RealtimeChannel,
+  client: SupabaseClient
+) {
+  if (manager.retryTimer) return;
+
+  manager.retryTimer = setTimeout(async () => {
+    manager.retryTimer = null;
+    try {
+      await client.removeChannel(channel);
+    } catch (error) {
+      console.error('[EcoLoop]: Failed to remove stale realtime channel:', error);
+    }
+    if (!manager.channel) connectRealtime(manager);
+  }, 1500);
+}
+
+function scheduleDataRefresh(manager: RealtimeManager) {
+  if (manager.refreshTimer) clearTimeout(manager.refreshTimer);
+  manager.refreshTimer = setTimeout(() => {
+    manager.refreshTimer = null;
+    manager.onChange?.();
+  }, 200);
+}
+
+function connectRealtime(manager: RealtimeManager) {
+  if (!supabase || manager.channel || manager.retryTimer) return;
+
+  const client = supabase;
+  const channel = client
+    .channel('ecoloop-live-network')
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'listings' },
+      () => scheduleDataRefresh(manager)
+    )
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'claims' },
+      () => scheduleDataRefresh(manager)
+    )
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'profiles' },
+      () => scheduleDataRefresh(manager)
+    );
+
+  manager.channel = channel;
+  channel.subscribe((status) => {
+    if (manager.channel !== channel) return;
+    manager.status = status;
+    manager.onStatusChange?.(status === 'SUBSCRIBED');
+
+    if (
+      status === 'CLOSED' ||
+      status === 'CHANNEL_ERROR' ||
+      status === 'TIMED_OUT'
+    ) {
+      manager.channel = null;
+      scheduleRealtimeReconnect(manager, channel, client);
+    }
+  });
+}
+
+export function startEcoLoopRealtime(
+  onChange: () => void,
+  onStatusChange: (connected: boolean) => void
+) {
+  if (!supabase || !isCloudConfigured) return;
+
+  const manager = getRealtimeManager();
+  manager.onChange = onChange;
+  manager.onStatusChange = onStatusChange;
+  onStatusChange(manager.status === 'SUBSCRIBED');
+  connectRealtime(manager);
+
+  if (!manager.listenersAttached && typeof document !== 'undefined') {
+    const refreshIfVisible = () => {
+      if (document.visibilityState === 'visible') manager.onChange?.();
+    };
+    document.addEventListener('visibilitychange', refreshIfVisible);
+    window.addEventListener('focus', refreshIfVisible);
+    manager.pollTimer = setInterval(refreshIfVisible, 4500);
+    manager.listenersAttached = true;
+  }
+}
 
 export function mapRowToProfile(
   row: Record<string, any>,

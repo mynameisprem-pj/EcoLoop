@@ -54,13 +54,19 @@ export const SurplusCard: React.FC<SurplusCardProps> = ({
   onClaim,
   onTrackOnMap,
 }) => {
-  const { activeRole, userId, listings, deleteOrReportListing } = useEcoStore();
+  const {
+    activeRole,
+    userId,
+    currentUser,
+    listings,
+    deleteOrReportListing,
+  } = useEcoStore();
   const [confirmAction, setConfirmAction] = useState<'delete' | 'report' | null>(
     null
   );
 
   const visual = CATEGORY_VISUALS[listing.category] || CATEGORY_VISUALS.produce;
-  const isOwnListing = listing.donorId === userId;
+  const isOwnListing = listing.donorId === (currentUser?.id || userId);
   const isConsumer = activeRole === 'receiver' && !isOwnListing;
 
   // A store earns the Verified Badge if it has completed at least 1 QR-verified rescue

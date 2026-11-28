@@ -26,6 +26,7 @@ import {
   mapClaimToRow,
   mapRowToProfile,
   mapProfileToRow,
+  startEcoLoopRealtime,
 } from '../lib/supabase';
 
 export type SortOption = 'urgency' | 'distance' | 'impact';
@@ -137,8 +138,8 @@ const DEFAULT_FILTERS: FilterState = {
   sortBy: 'urgency',
 };
 
-let realtimeSubscribed = false;
 let authListenerAttached = false;
+let refreshSequence = 0;
 
 async function hydrateProfileFromCloud(
   uid: string,
@@ -276,34 +277,13 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
         });
       }
 
-      if (supabase && isCloudConfigured && !realtimeSubscribed) {
-        realtimeSubscribed = true;
-        supabase
-          .channel('ecoloop-live-network')
-          .on(
-            'postgres_changes',
-            { event: '*', schema: 'public', table: 'listings' },
-            () => {
-              get().refreshData();
-            }
-          )
-          .on(
-            'postgres_changes',
-            { event: '*', schema: 'public', table: 'claims' },
-            () => {
-              get().refreshData();
-            }
-          )
-          .on(
-            'postgres_changes',
-            { event: '*', schema: 'public', table: 'profiles' },
-            () => {
-              get().refreshData();
-            }
-          )
-          .subscribe((status) => {
-            set({ isLiveConnected: status === 'SUBSCRIBED' });
-          });
+      if (supabase && isCloudConfigured) {
+        startEcoLoopRealtime(
+          () => {
+            void get().refreshData();
+          },
+          (isLiveConnected) => set({ isLiveConnected })
+        );
       }
 
       set({ isInitialized: true, isLoading: false });
@@ -315,6 +295,7 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
   },
 
   refreshData: async () => {
+    const requestId = ++refreshSequence;
     try {
       if (supabase && isCloudConfigured) {
         const [
@@ -332,6 +313,8 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
             .order('claimed_at', { ascending: false }),
           supabase.from('profiles').select('id, verified_store'),
         ]);
+
+        if (requestId !== refreshSequence) return;
 
         const verifiedIds = new Set<string>(['demo-judge-01']);
         if (cloudProfiles) {
@@ -358,9 +341,14 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
           });
 
           const impact = computeAggregateImpact(parsedListings, parsedClaims);
+          if (requestId !== refreshSequence) return;
+          const selectedClaim = get().selectedClaimForModal;
           set({
             listings: parsedListings,
             claims: parsedClaims,
+            selectedClaimForModal: selectedClaim
+              ? parsedClaims.find((claim) => claim.id === selectedClaim.id) || null
+              : null,
             verifiedDonorIds: Array.from(verifiedIds),
             impact,
           });
@@ -379,9 +367,14 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
       }
 
       const impact = computeAggregateImpact(localListings, localClaims);
+      if (requestId !== refreshSequence) return;
+      const selectedClaim = get().selectedClaimForModal;
       set({
         listings: localListings,
         claims: localClaims,
+        selectedClaimForModal: selectedClaim
+          ? localClaims.find((claim) => claim.id === selectedClaim.id) || null
+          : null,
         verifiedDonorIds: Array.from(verifiedIds),
         impact,
       });
@@ -444,7 +437,12 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
   },
 
   setActiveTab: (tab) => set({ activeTab: tab }),
-  setSelectedClaimForModal: (claim) => set({ selectedClaimForModal: claim }),
+  setSelectedClaimForModal: (claim) =>
+    set({
+      selectedClaimForModal: claim
+        ? get().claims.find((current) => current.id === claim.id) || claim
+        : null,
+    }),
   setTrackedListing: (listing) => set({ trackedListing: listing }),
 
   setAuthModalOpen: (open, afterAuth) =>
@@ -525,7 +523,8 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
   resetFilters: () => set({ filters: DEFAULT_FILTERS }),
 
   addListing: async (input: NewListingInput) => {
-    const { userId, currentUser } = get();
+    const { userId: storedUserId, currentUser } = get();
+    const userId = currentUser?.id || storedUserId;
 
     if (!currentUser) {
       get().setAuthModalOpen(true, () => {
@@ -584,7 +583,13 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
   },
 
   claimListing: async (listingId: string, consumerName?: string) => {
-    const { userId, userName, activeRole, currentUser } = get();
+    const {
+      userId: storedUserId,
+      userName,
+      activeRole,
+      currentUser,
+    } = get();
+    const userId = currentUser?.id || storedUserId;
 
     if (!currentUser) {
       get().setAuthModalOpen(true, () => {
@@ -680,7 +685,8 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
   verifyPickupCode: async (claimId: string, enteredCode: string) => {
     const normalizedInput = enteredCode.trim().toUpperCase();
     const now = Date.now();
-    const { userId, userName, listings } = get();
+    const { userId: storedUserId, userName, listings, currentUser } = get();
+    const userId = currentUser?.id || storedUserId;
 
     try {
       const claim = get().claims.find((c) => c.id === claimId);
@@ -704,7 +710,7 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
       }
 
       if (supabase && isCloudConfigured) {
-        await Promise.all([
+        const [{ error: claimError }, { error: listingError }] = await Promise.all([
           supabase
             .from('claims')
             .update({ status: 'verified_complete', completed_at: now })
@@ -714,6 +720,11 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
             .update({ status: 'completed' })
             .eq('id', claim.listingId),
         ]);
+        if (claimError || listingError) {
+          throw new Error(
+            claimError?.message || listingError?.message || 'Pickup verification failed.'
+          );
+        }
       }
 
       await db.transaction('rw', db.listings, db.claims, async () => {
@@ -742,7 +753,7 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
       if (!claim) return;
 
       if (supabase && isCloudConfigured) {
-        await Promise.all([
+        const [{ error: claimError }, { error: listingError }] = await Promise.all([
           supabase
             .from('claims')
             .update({ status: 'cancelled' })
@@ -758,6 +769,11 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
             })
             .eq('id', claim.listingId),
         ]);
+        if (claimError || listingError) {
+          throw new Error(
+            claimError?.message || listingError?.message || 'Claim cancellation failed.'
+          );
+        }
       }
 
       await db.transaction('rw', db.listings, db.claims, async () => {
@@ -779,7 +795,8 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
   },
 
   deleteOrReportListing: async (listingId: string) => {
-    const { userId, userName, listings } = get();
+    const { userId: storedUserId, userName, listings, currentUser } = get();
+    const userId = currentUser?.id || storedUserId;
     try {
       const target = listings.find((l) => l.id === listingId);
       const isOwner =
@@ -804,17 +821,19 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
   },
 
   getMyConsumerClaims: () => {
-    const { claims, userId } = get();
-    return claims.filter((c) => c.receiverId === userId);
+    const { claims, userId, currentUser } = get();
+    const effectiveUserId = currentUser?.id || userId;
+    return claims.filter((c) => c.receiverId === effectiveUserId);
   },
 
   getIncomingStoreClaims: () => {
-    const { claims, listings, userId, userName } = get();
+    const { claims, listings, userId, userName, currentUser } = get();
+    const effectiveUserId = currentUser?.id || userId;
     const myStoreListingIds = new Set(
       listings
         .filter(
           (l) =>
-            l.donorId === userId ||
+            l.donorId === effectiveUserId ||
             (userName.trim() !== '' &&
               l.donorName.toLowerCase() === userName.trim().toLowerCase())
         )

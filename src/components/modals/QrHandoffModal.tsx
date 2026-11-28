@@ -1,5 +1,5 @@
 // src/components/modals/QrHandoffModal.tsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import type { Html5Qrcode } from 'html5-qrcode';
 import {
@@ -18,6 +18,7 @@ import { useEcoStore } from '../../store/useEcoStore';
 export const QrHandoffModal: React.FC = () => {
   const {
     activeRole,
+    claims,
     selectedClaimForModal,
     setSelectedClaimForModal,
     verifyPickupCode,
@@ -29,8 +30,12 @@ export const QrHandoffModal: React.FC = () => {
   const scannerRef = useRef<Html5Qrcode | null>(null);
 
   const isStorePartner = activeRole === 'donor';
+  const activeClaim = selectedClaimForModal
+    ? claims.find((claim) => claim.id === selectedClaimForModal.id) ||
+      selectedClaimForModal
+    : null;
 
-  async function stopCameraScanner() {
+  const stopScanner = useCallback(async () => {
     if (scannerRef.current) {
       try {
         if (scannerRef.current.isScanning) {
@@ -42,17 +47,26 @@ export const QrHandoffModal: React.FC = () => {
       }
       scannerRef.current = null;
     }
+  }, []);
+  const stopCameraScanner = useCallback(async () => {
+    await stopScanner();
     setIsCameraActive(false);
-  }
+  }, [stopScanner]);
 
   useEffect(() => {
     return () => {
-      stopCameraScanner();
+      void stopCameraScanner();
     };
-  }, [selectedClaimForModal]);
+  }, [activeClaim?.id, stopCameraScanner]);
+
+  useEffect(() => {
+    if (activeClaim?.status !== 'pending_pickup') {
+      void stopScanner();
+    }
+  }, [activeClaim?.status, stopScanner]);
 
   const startCameraScanner = async () => {
-    if (!selectedClaimForModal) return;
+    if (!activeClaim) return;
     setErrorMsg(null);
     setIsCameraActive(true);
 
@@ -71,7 +85,7 @@ export const QrHandoffModal: React.FC = () => {
               parts.length === 3 ? parts[2] : decodedText.trim();
 
             const ok = await verifyPickupCode(
-              selectedClaimForModal.id,
+              activeClaim.id,
               extractedCode
             );
             if (ok) {
@@ -93,16 +107,18 @@ export const QrHandoffModal: React.FC = () => {
     }, 150);
   };
 
-  if (!selectedClaimForModal) return null;
+  if (!activeClaim) return null;
 
-  const isVerified = selectedClaimForModal.status === 'verified_complete';
-  const qrPayload = `ECOLOOP|${selectedClaimForModal.id}|${selectedClaimForModal.pickupCode}`;
+  const isVerified = activeClaim.status === 'verified_complete';
+  const isCancelled = activeClaim.status === 'cancelled';
+  const isCameraVisible = isCameraActive && !isVerified && !isCancelled;
+  const qrPayload = `ECOLOOP|${activeClaim.id}|${activeClaim.pickupCode}`;
 
   const handleManualVerify = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
     const success = await verifyPickupCode(
-      selectedClaimForModal.id,
+      activeClaim.id,
       enteredCode
     );
     if (!success) {
@@ -141,17 +157,17 @@ export const QrHandoffModal: React.FC = () => {
               : 'Your Consumer Pickup Ticket'}
           </span>
           <h3 className="text-lg font-extrabold text-white mt-0.5 leading-snug">
-            {selectedClaimForModal.listingTitle}
+            {activeClaim.listingTitle}
           </h3>
           <p className="text-xs text-slate-400">
             {isStorePartner
-              ? `Customer: ${selectedClaimForModal.receiverName}`
-              : `Pickup at: ${selectedClaimForModal.donorName}`}
+              ? `Customer: ${activeClaim.receiverName}`
+              : `Pickup at: ${activeClaim.donorName}`}
           </p>
         </div>
 
         {/* CONSUMER VIEW: Shows their secret QR Code and ECO-XXX Pass to hold up */}
-        {(!isStorePartner || isVerified) && (
+        {(!isStorePartner || isVerified) && !isCancelled && (
           <div className="my-5 flex flex-col items-center">
             <div className="relative p-4 rounded-2xl bg-white text-slate-950 shadow-[0_0_30px_rgba(16,185,129,0.25)]">
               <div
@@ -186,16 +202,16 @@ export const QrHandoffModal: React.FC = () => {
                 Show this code to store staff
               </span>
               <span className="mt-1 inline-block font-mono text-xl font-black tracking-widest text-emerald-300 bg-emerald-950/80 border border-emerald-500/40 px-4 py-1 rounded-xl">
-                {selectedClaimForModal.pickupCode}
+                {activeClaim.pickupCode}
               </span>
             </div>
           </div>
         )}
 
         {/* STORE PARTNER VIEW: Shows Camera Scanner & Code Verification Input */}
-        {isStorePartner && !isVerified && (
+        {isStorePartner && !isVerified && !isCancelled && (
           <div className="my-4 space-y-3">
-            {isCameraActive ? (
+            {isCameraVisible ? (
               <div className="space-y-2">
                 <div
                   id="ecoloop-qr-reader"
@@ -253,26 +269,32 @@ export const QrHandoffModal: React.FC = () => {
           </div>
         )}
 
+        {isCancelled && (
+          <div className="my-5 rounded-2xl border border-rose-400/30 bg-rose-500/10 p-4 text-center text-sm font-semibold text-rose-200">
+            This reservation was cancelled and is no longer available.
+          </div>
+        )}
+
         {/* Impact Strip */}
         <div className="grid grid-cols-3 gap-2 p-2.5 rounded-2xl bg-black/40 border border-white/10 text-center mb-3">
           <div className="p-1.5">
             <Scale className="w-4 h-4 text-emerald-400 mx-auto mb-0.5" />
             <p className="text-xs font-extrabold text-white">
-              {selectedClaimForModal.weightKg} kg
+              {activeClaim.weightKg} kg
             </p>
             <p className="text-[10px] text-slate-400">Weight</p>
           </div>
           <div className="p-1.5 border-x border-white/10">
             <Utensils className="w-4 h-4 text-emerald-400 mx-auto mb-0.5" />
             <p className="text-xs font-extrabold text-white">
-              {selectedClaimForModal.mealsSaved}
+              {activeClaim.mealsSaved}
             </p>
             <p className="text-[10px] text-slate-400">Meals</p>
           </div>
           <div className="p-1.5">
             <Leaf className="w-4 h-4 text-emerald-400 mx-auto mb-0.5" />
             <p className="text-xs font-extrabold text-emerald-300">
-              {selectedClaimForModal.co2SavedKg} kg
+              {activeClaim.co2SavedKg} kg
             </p>
             <p className="text-[10px] text-slate-400">CO₂e Saved</p>
           </div>
