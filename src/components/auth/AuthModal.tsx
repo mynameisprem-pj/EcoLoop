@@ -3,8 +3,6 @@ import React, { useState } from 'react';
 import {
   ShieldCheck,
   Sparkles,
-  Store,
-  User,
   LogOut,
   BadgeCheck,
   X,
@@ -17,40 +15,15 @@ export const AuthModal: React.FC = () => {
     setAuthModalOpen,
     currentUser,
     activeRole,
-    signInWithEmail,
     signInWithGoogle,
     signInAsDemo,
-    verifyCurrentStore,
-    toggleInstantStoreVerification,
     signOutAccount,
   } = useEcoStore();
 
-  const [email, setEmail] = useState('');
-  const [name, setName] = useState('');
-  const [regCode, setRegCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   if (!authModalOpen) return null;
-
-  const handleEmailAuth = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    if (!email.trim()) {
-      setError('Enter your email address.');
-      return;
-    }
-    setLoading(true);
-    try {
-      await signInWithEmail(email.trim(), name.trim());
-      setEmail('');
-      setName('');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Sign-in failed.');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleGoogleAuth = async () => {
     setError(null);
@@ -60,17 +33,6 @@ export const AuthModal: React.FC = () => {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Google sign-in failed.');
       setLoading(false);
-    }
-  };
-
-  const handleRegSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    const ok = await verifyCurrentStore(regCode);
-    if (!ok) {
-      setError('Enter a valid registration or food-safety ID (at least 5 characters).');
-    } else {
-      setRegCode('');
     }
   };
 
@@ -93,36 +55,6 @@ export const AuthModal: React.FC = () => {
           </button>
         </div>
 
-        {/* 1-Click Judge / Demo Profiles */}
-        <div className="p-3 rounded-xl bg-emerald-950/40 border border-emerald-500/25 space-y-2">
-          <p className="text-[11px] font-semibold text-emerald-300 flex items-center gap-1">
-            <Sparkles className="w-3.5 h-3.5 shrink-0" /> 1-Click Judge Demo Profiles
-          </p>
-          <div className="grid grid-cols-3 gap-1.5">
-            <button
-              type="button"
-              onClick={() => signInAsDemo('receiver', false)}
-              className="py-2 px-2 rounded-xl bg-white/10 hover:bg-white/15 text-[11px] font-bold text-white flex items-center justify-center gap-1 cursor-pointer"
-            >
-              <User className="w-3 h-3 text-emerald-400 shrink-0" /> Rescuer
-            </button>
-            <button
-              type="button"
-              onClick={() => signInAsDemo('donor', false)}
-              className="py-2 px-2 rounded-xl bg-white/10 hover:bg-white/15 text-[11px] font-bold text-white flex items-center justify-center gap-1 cursor-pointer"
-            >
-              <Store className="w-3 h-3 text-amber-400 shrink-0" /> 5kg Store
-            </button>
-            <button
-              type="button"
-              onClick={() => signInAsDemo('donor', true)}
-              className="py-2 px-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-[11px] font-extrabold text-slate-950 flex items-center justify-center gap-1 cursor-pointer"
-            >
-              <BadgeCheck className="w-3 h-3 shrink-0" /> Verified
-            </button>
-          </div>
-        </div>
-
         {!currentUser ? (
           <div className="space-y-3">
             <button
@@ -134,40 +66,16 @@ export const AuthModal: React.FC = () => {
               Continue with Google (Cross-Device Sync)
             </button>
 
-            <form onSubmit={handleEmailAuth} className="space-y-2.5">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Name or Store Name
-                </label>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g., Lakeside Organic Market"
-                  className="w-full rounded-xl bg-black/40 border border-white/15 px-3 py-2 text-xs sm:text-sm text-white"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Email Address *
-                </label>
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="name@example.com"
-                  className="w-full rounded-xl bg-black/40 border border-white/15 px-3 py-2 text-xs sm:text-sm text-white"
-                />
-              </div>
+            <div className="p-3 rounded-xl bg-emerald-950/40 border border-emerald-500/25">
               <button
-                type="submit"
+                type="button"
+                onClick={() => signInAsDemo()}
                 disabled={loading}
-                className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs uppercase tracking-wider cursor-pointer"
+                className="w-full py-2.5 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs cursor-pointer flex items-center justify-center gap-1.5"
               >
-                {loading ? 'Syncing...' : 'Continue with Email'}
+                <Sparkles className="w-3.5 h-3.5" /> Judge Demo Access
               </button>
-            </form>
+            </div>
           </div>
         ) : (
           <div className="space-y-3">
@@ -194,41 +102,6 @@ export const AuthModal: React.FC = () => {
                 Role: {activeRole === 'donor' ? 'Store Partner' : 'Consumer'} • Cap: {currentUser.maxWeightCapKg} kg
               </p>
             </div>
-
-            {activeRole === 'donor' && (
-              <div className="p-3 rounded-xl bg-black/30 border border-white/10 space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-semibold text-slate-200">
-                    Store Verification Status
-                  </span>
-                  <button
-                    type="button"
-                    onClick={toggleInstantStoreVerification}
-                    className="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/40 text-[11px] font-bold text-emerald-300 cursor-pointer"
-                  >
-                    {currentUser.verifiedStore ? 'Unverify (5kg)' : 'Instant Verify (50kg)'}
-                  </button>
-                </div>
-
-                {!currentUser.verifiedStore && (
-                  <form onSubmit={handleRegSubmit} className="flex gap-1.5 pt-1">
-                    <input
-                      type="text"
-                      value={regCode}
-                      onChange={(e) => setRegCode(e.target.value)}
-                      placeholder="Business / food-safety ID"
-                      className="flex-1 min-w-0 rounded-xl bg-black/40 border border-white/15 px-2.5 py-1.5 text-xs text-white"
-                    />
-                    <button
-                      type="submit"
-                      className="px-3 py-1.5 rounded-xl bg-emerald-500 text-slate-950 font-bold text-xs shrink-0 cursor-pointer"
-                    >
-                      Verify
-                    </button>
-                  </form>
-                )}
-              </div>
-            )}
 
             <button
               type="button"

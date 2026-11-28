@@ -26,6 +26,7 @@ import { QrHandoffModal } from './components/modals/QrHandoffModal';
 import { AuthModal } from './components/auth/AuthModal';
 import { EcoLoopLogo } from './components/common/EcoLoopLogo';
 import {
+  getSavedLocation,
   requestBrowserGps,
   reverseGeocode,
   searchAddressCoordinates,
@@ -102,15 +103,16 @@ export function App() {
       setLocationError(
         err instanceof Error ? err.message : 'Location permission needed'
       );
-      if (!useEcoStore.getState().userLocation) {
-        setUserLocation(DEFAULT_COORDS, 'Set Location');
-      }
     } finally {
       setIsLocating(false);
     }
   }, [setUserLocation, setLocationError]);
 
   useEffect(() => {
+    const savedLocation = getSavedLocation();
+    if (savedLocation) {
+      setUserLocation(savedLocation.coords, savedLocation.label);
+    }
     initializeStore();
     detectLiveGpsLocation();
 
@@ -118,7 +120,12 @@ export function App() {
       sweepExpiredListings();
     }, 10000);
     return () => clearInterval(sweepTimer);
-  }, [initializeStore, sweepExpiredListings, detectLiveGpsLocation]);
+  }, [
+    initializeStore,
+    sweepExpiredListings,
+    detectLiveGpsLocation,
+    setUserLocation,
+  ]);
 
   const handleManualLocationSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -238,7 +245,7 @@ export function App() {
               <button
                 type="button"
                 onClick={() => setShowLocationPicker((prev) => !prev)}
-                className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-medium text-slate-200 bg-white/5 hover:bg-white/10 border border-white/10 px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-full transition-colors cursor-pointer max-w-[96px] sm:max-w-[160px]"
+                className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-medium text-slate-200 bg-white/5 hover:bg-white/10 border border-white/10 px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-full transition-colors cursor-pointer max-w-[84px] sm:max-w-[160px]"
               >
                 <MapPin className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-emerald-400 shrink-0" />
                 <span className="truncate">{locationLabel}</span>
@@ -260,7 +267,7 @@ export function App() {
                     }}
                     className="w-full py-2 px-3 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/40 text-xs font-bold text-emerald-300 flex items-center justify-center gap-1.5 cursor-pointer"
                   >
-                    <LocateFixed className="w-3.5 h-3.5" /> Use My Exact GPS
+                    <LocateFixed className="w-3.5 h-3.5" /> Refresh Exact GPS
                   </button>
                   <form
                     onSubmit={handleManualLocationSearch}

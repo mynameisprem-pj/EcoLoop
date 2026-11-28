@@ -10,6 +10,55 @@ export interface ResolvedLocation extends Coordinates {
   cityOrArea: string;
 }
 
+export const SAVED_LOCATION_KEY = 'ecoloop_saved_location';
+
+export interface SavedLocation {
+  coords: Coordinates;
+  label: string;
+}
+
+function isValidSavedCoordinates(value: unknown): value is Coordinates {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('lat' in value) ||
+    !('lng' in value) ||
+    typeof value.lat !== 'number' ||
+    typeof value.lng !== 'number'
+  ) {
+    return false;
+  }
+  return isValidCoordinate({ lat: value.lat, lng: value.lng });
+}
+
+export function getSavedLocation(): SavedLocation | null {
+  if (typeof localStorage === 'undefined') return null;
+
+  try {
+    const saved = localStorage.getItem(SAVED_LOCATION_KEY);
+    if (!saved) return null;
+
+    const location: unknown = JSON.parse(saved);
+    if (
+      typeof location !== 'object' ||
+      location === null ||
+      !('coords' in location) ||
+      !('label' in location) ||
+      typeof location.label !== 'string' ||
+      !isValidSavedCoordinates(location.coords)
+    ) {
+      return null;
+    }
+
+    return {
+      coords: location.coords,
+      label: location.label,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Checks if coordinates are valid real-world numbers and not (0,0)
  */
@@ -55,18 +104,21 @@ function toRad(deg: number): number {
 }
 
 /**
- * Requests live GPS coordinates from the browser.
- * If high-accuracy GPS times out (common on Windows/Mac laptops without GPS chips),
- * automatically retries with Wi-Fi/network triangulation.
+ * Requests browser location using network positioning, falling back to a
+ * previously confirmed location when geolocation is unavailable or times out.
  */
 export function requestBrowserGps(): Promise<Coordinates> {
   return new Promise((resolve, reject) => {
-    if (!('geolocation' in navigator)) {
+    const savedLocation = getSavedLocation();
+    if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
+      if (savedLocation) {
+        resolve(savedLocation.coords);
+        return;
+      }
       reject(new Error('Geolocation is not supported by your browser.'));
       return;
     }
 
-    // First attempt: High accuracy (best for phones)
     navigator.geolocation.getCurrentPosition(
       (position) => {
         resolve({
@@ -74,22 +126,14 @@ export function requestBrowserGps(): Promise<Coordinates> {
           lng: position.coords.longitude,
         });
       },
-      () => {
-        // Fallback attempt for laptops/desktops: standard network/Wi-Fi positioning
-        navigator.geolocation.getCurrentPosition(
-          (pos) => {
-            resolve({
-              lat: pos.coords.latitude,
-              lng: pos.coords.longitude,
-            });
-          },
-          (err) => {
-            reject(new Error(err.message || 'Location permission denied.'));
-          },
-          { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 }
-        );
+      (err) => {
+        if (savedLocation) {
+          resolve(savedLocation.coords);
+          return;
+        }
+        reject(new Error(err.message || 'Location permission denied.'));
       },
-      { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+      { enableHighAccuracy: false, timeout: 7000, maximumAge: 60000 }
     );
   });
 }

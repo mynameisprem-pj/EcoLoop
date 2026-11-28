@@ -15,6 +15,7 @@ import {
   computeAggregateImpact,
   generatePickupCode,
 } from '../utils/impactCalculator';
+import { SAVED_LOCATION_KEY } from '../utils/geoUtils';
 import type { Coordinates } from '../utils/geoUtils';
 import {
   supabase,
@@ -103,15 +104,8 @@ interface EcoStoreState {
   setTrackedListing: (listing: SurplusListing | null) => void;
 
   setAuthModalOpen: (open: boolean, afterAuth?: () => void) => void;
-  signInWithEmail: (
-    email: string,
-    displayName: string,
-    password?: string
-  ) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
-  signInAsDemo: (role: UserRole, verified?: boolean) => Promise<void>;
-  verifyCurrentStore: (regCode: string) => Promise<boolean>;
-  toggleInstantStoreVerification: () => Promise<void>;
+  signInAsDemo: () => Promise<void>;
   signOutAccount: () => Promise<void>;
 
   setSearchQuery: (query: string) => void;
@@ -166,7 +160,7 @@ async function hydrateProfileFromCloud(
     authMode,
   };
 
-  if (supabase && isCloudConfigured) {
+  if (supabase && isCloudConfigured && authMode === 'supabase') {
     const { data: existingRow } = await supabase
       .from('profiles')
       .select('*')
@@ -198,7 +192,7 @@ async function hydrateProfileFromCloud(
 export const useEcoStore = create<EcoStoreState>((set, get) => ({
   listings: [],
   claims: [],
-  verifiedDonorIds: ['demo-store-verified-01'],
+  verifiedDonorIds: ['demo-judge-01'],
   impact: {
     totalWeightKg: 0,
     totalMealsSaved: 0,
@@ -339,7 +333,7 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
           supabase.from('profiles').select('id, verified_store'),
         ]);
 
-        const verifiedIds = new Set<string>(['demo-store-verified-01']);
+        const verifiedIds = new Set<string>(['demo-judge-01']);
         if (cloudProfiles) {
           for (const p of cloudProfiles) {
             if (p.verified_store && p.id) {
@@ -423,8 +417,13 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
     }
   },
 
-  setUserLocation: (coords, label) =>
-    set({ userLocation: coords, locationLabel: label, locationError: null }),
+  setUserLocation: (coords, label) => {
+    localStorage.setItem(
+      SAVED_LOCATION_KEY,
+      JSON.stringify({ coords, label })
+    );
+    set({ userLocation: coords, locationLabel: label, locationError: null });
+  },
 
   setLocationError: (err) => set({ locationError: err }),
 
@@ -454,48 +453,6 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
       pendingAuthAction: open ? afterAuth || null : null,
     }),
 
-  signInWithEmail: async (email, displayName, password = 'EcoLoopSync!2026') => {
-    if (!supabase || !isCloudConfigured) {
-      throw new Error('Supabase cloud is not configured.');
-    }
-
-    const cleanEmail = email.trim().toLowerCase();
-    const cleanName = displayName.trim() || cleanEmail.split('@')[0];
-
-    let { data, error } = await supabase.auth.signInWithPassword({
-      email: cleanEmail,
-      password,
-    });
-    let user = data.user;
-
-    if (error) {
-      const signUpRes = await supabase.auth.signUp({
-        email: cleanEmail,
-        password,
-        options: { data: { full_name: cleanName } },
-      });
-      if (signUpRes.error) throw new Error(signUpRes.error.message);
-      user = signUpRes.data.user;
-    }
-
-    if (user) {
-      await hydrateProfileFromCloud(
-        user.id,
-        cleanEmail,
-        cleanName,
-        get().activeRole,
-        'supabase',
-        false,
-        set,
-        get().refreshData
-      );
-    }
-
-    const action = get().pendingAuthAction;
-    set({ authModalOpen: false, pendingAuthAction: null, error: null });
-    if (action) action();
-  },
-
   signInWithGoogle: async () => {
     if (!supabase || !isCloudConfigured) {
       throw new Error('Supabase cloud is not configured.');
@@ -509,34 +466,14 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
     if (error) throw new Error(error.message);
   },
 
-  signInAsDemo: async (role, verified = role === 'donor') => {
-    const demoId =
-      role === 'donor'
-        ? verified
-          ? 'demo-store-verified-01'
-          : 'demo-store-unverified-01'
-        : 'demo-consumer-01';
-    const demoEmail =
-      role === 'donor'
-        ? verified
-          ? 'verified-store@ecoloop.demo'
-          : 'unverified-store@ecoloop.demo'
-        : 'consumer@ecoloop.demo';
-    const demoName =
-      role === 'donor'
-        ? verified
-          ? 'Sunrise Verified Bakery'
-          : 'Unverified Community Donor'
-        : 'Community Rescuer';
-
-    set({ activeRole: role });
+  signInAsDemo: async () => {
     await hydrateProfileFromCloud(
-      demoId,
-      demoEmail,
-      demoName,
-      role,
+      'demo-judge-01',
+      'demo-judge@ecoloop.app',
+      'Judge Demo',
+      get().activeRole,
       'demo',
-      verified,
+      true,
       set,
       get().refreshData
     );
@@ -544,55 +481,6 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
     const action = get().pendingAuthAction;
     set({ authModalOpen: false, pendingAuthAction: null, error: null });
     if (action) action();
-  },
-
-  verifyCurrentStore: async (regCode) => {
-    const cleanCode = regCode.trim().toUpperCase();
-    if (cleanCode.length < 5) return false;
-
-    const { currentUser, userId } = get();
-    if (!currentUser) return false;
-
-    const updated: AccountProfile = {
-      ...currentUser,
-      verifiedStore: true,
-      businessRegCode: cleanCode,
-      maxWeightCapKg: 50,
-    };
-
-    if (supabase && isCloudConfigured && currentUser.authMode === 'supabase') {
-      await supabase.from('profiles').upsert(mapProfileToRow(updated));
-    }
-
-    set((s) => ({
-      currentUser: updated,
-      verifiedDonorIds: Array.from(new Set([...s.verifiedDonorIds, userId])),
-    }));
-    return true;
-  },
-
-  toggleInstantStoreVerification: async () => {
-    const { currentUser, userId } = get();
-    if (!currentUser) return;
-
-    const nextVerified = !currentUser.verifiedStore;
-    const updated: AccountProfile = {
-      ...currentUser,
-      verifiedStore: nextVerified,
-      businessRegCode: nextVerified ? currentUser.businessRegCode || 'DEMO-VERIFIED' : undefined,
-      maxWeightCapKg: nextVerified ? 50 : 5,
-    };
-
-    if (supabase && isCloudConfigured && currentUser.authMode === 'supabase') {
-      await supabase.from('profiles').upsert(mapProfileToRow(updated));
-    }
-
-    set((s) => ({
-      currentUser: updated,
-      verifiedDonorIds: nextVerified
-        ? Array.from(new Set([...s.verifiedDonorIds, userId]))
-        : s.verifiedDonorIds.filter((id) => id !== userId),
-    }));
   },
 
   signOutAccount: async () => {
