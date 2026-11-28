@@ -76,17 +76,9 @@ function getOrCreateGuestUserId(): string {
   return existing;
 }
 
-const OWN_LISTING_IDS_KEY = 'ecoloop_own_listing_ids';
-
-function getOwnListingIds(): string[] {
-  const stored = localStorage.getItem(OWN_LISTING_IDS_KEY);
-  return stored ? stored.split('\n').filter(Boolean) : [];
-}
-
 interface EcoStoreState {
   listings: SurplusListing[];
   claims: ClaimRecord[];
-  ownListingIds: string[];
   verifiedDonorIds: string[];
   impact: ImpactMetrics;
   isInitialized: boolean;
@@ -157,8 +149,8 @@ const DEFAULT_FILTERS: FilterState = {
 };
 
 let authListenerAttached = false;
-let ownListingStorageListenerAttached = false;
 let refreshSequence = 0;
+let sessionSequence = 0;
 
 async function hydrateProfileFromCloud(
   uid: string,
@@ -168,7 +160,8 @@ async function hydrateProfileFromCloud(
   authMode: 'supabase' | 'guest',
   defaultVerified: boolean,
   set: (partial: Partial<EcoStoreState>) => void,
-  refreshData: () => Promise<void>
+  refreshData: () => Promise<void>,
+  sessionVersion: number
 ) {
   let profile: AccountProfile = {
     id: uid,
@@ -198,6 +191,8 @@ async function hydrateProfileFromCloud(
     }
   }
 
+  if (sessionVersion !== sessionSequence) return;
+
   localStorage.setItem('ecoloop_user_name', profile.displayName);
 
   set({
@@ -212,7 +207,6 @@ async function hydrateProfileFromCloud(
 export const useEcoStore = create<EcoStoreState>((set, get) => ({
   listings: [],
   claims: [],
-  ownListingIds: getOwnListingIds(),
   verifiedDonorIds: ['demo-judge-01'],
   impact: {
     totalWeightKg: 0,
@@ -248,15 +242,6 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
     set({ isLoading: true, error: null });
 
     try {
-      if (!ownListingStorageListenerAttached) {
-        window.addEventListener('storage', (event) => {
-          if (event.key === OWN_LISTING_IDS_KEY) {
-            set({ ownListingIds: getOwnListingIds() });
-          }
-        });
-        ownListingStorageListenerAttached = true;
-      }
-
       await get().refreshData();
       await get().sweepExpiredListings();
 
@@ -265,6 +250,7 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
         const { data: sessionData } = await supabase.auth.getSession();
         if (sessionData.session?.user) {
           const u = sessionData.session.user;
+          const sessionVersion = ++sessionSequence;
           await hydrateProfileFromCloud(
             u.id,
             u.email || '',
@@ -273,7 +259,8 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
             'supabase',
             false,
             set,
-            get().refreshData
+            get().refreshData,
+            sessionVersion
           );
         }
 
@@ -281,6 +268,12 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
           if (event === 'SIGNED_IN' && session?.user) {
             const u = session.user;
             const action = get().pendingAuthAction;
+            const sessionVersion = ++sessionSequence;
+            set({
+              userId: getOrCreateDeviceUserId(),
+              currentUser: null,
+              selectedClaimForModal: null,
+            });
             await hydrateProfileFromCloud(
               u.id,
               u.email || '',
@@ -289,15 +282,19 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
               'supabase',
               false,
               set,
-              get().refreshData
+              get().refreshData,
+              sessionVersion
             );
+            if (sessionVersion !== sessionSequence) return;
             set({ authModalOpen: false, pendingAuthAction: null });
             if (action) action();
           } else if (event === 'SIGNED_OUT') {
+            sessionSequence += 1;
             const deviceId = getOrCreateDeviceUserId();
             set({
               userId: deviceId,
               currentUser: null,
+              selectedClaimForModal: null,
               authModalOpen: false,
               pendingAuthAction: null,
             });
@@ -495,6 +492,12 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
 
   signInAsDemo: async () => {
     const guestId = getOrCreateGuestUserId();
+    const sessionVersion = ++sessionSequence;
+    set({
+      userId: getOrCreateDeviceUserId(),
+      currentUser: null,
+      selectedClaimForModal: null,
+    });
     await hydrateProfileFromCloud(
       guestId,
       'demo-judge@ecoloop.app',
@@ -503,8 +506,10 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
       'guest',
       true,
       set,
-      get().refreshData
+      get().refreshData,
+      sessionVersion
     );
+    if (sessionVersion !== sessionSequence) return;
 
     const action = get().pendingAuthAction;
     set({ authModalOpen: false, pendingAuthAction: null, error: null });
@@ -512,20 +517,24 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
   },
 
   signOutAccount: async () => {
-    if (
-      supabase &&
+    sessionSequence += 1;
+    const supabaseClient = supabase;
+    const shouldSignOutFromSupabase =
+      supabaseClient !== null &&
       isCloudConfigured &&
-      get().currentUser?.authMode === 'supabase'
-    ) {
-      await supabase.auth.signOut();
-    }
+      get().currentUser?.authMode === 'supabase';
     const deviceId = getOrCreateDeviceUserId();
     set({
       userId: deviceId,
       currentUser: null,
+      selectedClaimForModal: null,
       authModalOpen: false,
       pendingAuthAction: null,
     });
+
+    if (shouldSignOutFromSupabase && supabaseClient) {
+      await supabaseClient.auth.signOut();
+    }
     await get().refreshData();
   },
 
@@ -607,27 +616,24 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
     }
 
     await db.listings.put(newListing);
-    const ownListingIds = Array.from(
-      new Set([...getOwnListingIds(), newListing.id])
-    );
-    localStorage.setItem(OWN_LISTING_IDS_KEY, ownListingIds.join('\n'));
-    set({ ownListingIds });
     await get().refreshData();
     set({ activeTab: 'browse', error: null });
     return newListing;
   },
 
   claimListing: async (listingId: string, consumerName?: string) => {
-    const {
-      userId: storedUserId,
-      userName,
-      activeRole,
-      currentUser,
-    } = get();
+    const { userId: storedUserId, userName, currentUser, activeRole } = get();
     const userId = currentUser?.id || storedUserId;
+    const activeActorId = currentUser?.id ?? null;
 
-    if (getOwnListingIds().includes(listingId)) {
-      const message = 'You cannot claim a listing published from this browser.';
+    if (
+      activeActorId &&
+      get().listings.some(
+        (listing) =>
+          listing.id === listingId && listing.donorId === activeActorId
+      )
+    ) {
+      const message = 'You cannot claim your own listing.';
       set({ error: message });
       return null;
     }
@@ -858,22 +864,19 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
   },
 
   getMyConsumerClaims: () => {
-    const { claims, userId, currentUser } = get();
-    const effectiveUserId = currentUser?.id || userId;
-    return claims.filter((c) => c.receiverId === effectiveUserId);
+    const { claims, currentUser } = get();
+    const activeActorId = currentUser?.id ?? null;
+    if (!activeActorId) return [];
+    return claims.filter((c) => c.receiverId === activeActorId);
   },
 
   getIncomingStoreClaims: () => {
-    const { claims, listings, userId, userName, currentUser } = get();
-    const effectiveUserId = currentUser?.id || userId;
+    const { claims, listings, currentUser } = get();
+    const activeActorId = currentUser?.id ?? null;
+    if (!activeActorId) return [];
     const myStoreListingIds = new Set(
       listings
-        .filter(
-          (l) =>
-            l.donorId === effectiveUserId ||
-            (userName.trim() !== '' &&
-              l.donorName.toLowerCase() === userName.trim().toLowerCase())
-        )
+        .filter((l) => l.donorId === activeActorId)
         .map((l) => l.id)
     );
     return claims.filter((c) => myStoreListingIds.has(c.listingId));

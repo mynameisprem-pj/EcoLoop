@@ -56,10 +56,8 @@ export const SurplusCard: React.FC<SurplusCardProps> = ({
 }) => {
   const {
     activeRole,
-    userId,
     currentUser,
     listings,
-    ownListingIds,
     deleteOrReportListing,
   } = useEcoStore();
   const [confirmAction, setConfirmAction] = useState<'delete' | 'report' | null>(
@@ -67,12 +65,10 @@ export const SurplusCard: React.FC<SurplusCardProps> = ({
   );
 
   const visual = CATEGORY_VISUALS[listing.category] || CATEGORY_VISUALS.produce;
-  const isPublishedByThisBrowser = ownListingIds.includes(listing.id);
+  const activeActorId = currentUser?.id ?? null;
   const isOwnListing =
-    isPublishedByThisBrowser ||
-    listing.donorId === (currentUser?.id || userId);
-  const isConsumer =
-    activeRole === 'receiver' && !isPublishedByThisBrowser;
+    activeActorId !== null && listing.donorId === activeActorId;
+  const isConsumer = activeRole === 'receiver' && !isOwnListing;
 
   // A store earns the Verified Badge if it has completed at least 1 QR-verified rescue
   // OR if the listing includes a live food photo and valid GPS coordinates
@@ -213,11 +209,7 @@ export const SurplusCard: React.FC<SurplusCardProps> = ({
         <ExpiryActionBanner expiresAt={listing.expiresAt} />
 
         <div className="flex items-center gap-2 ml-auto">
-          {isPublishedByThisBrowser ? (
-            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-[11px] font-bold text-amber-200">
-              Published by This Browser
-            </span>
-          ) : isConsumer ? (
+          {isConsumer ? (
             <>
               <button
                 type="button"
