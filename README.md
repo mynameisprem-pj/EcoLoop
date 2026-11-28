@@ -178,6 +178,10 @@ VITE_SUPABASE_ANON_KEY=your-supabase-anon-public-key
 
 *(Note: If `.env` variables are omitted, EcoLoop automatically falls back to **Local Offline Mode** powered by Dexie.js IndexedDB.)*
 
+#### Enforce the daily claim limit
+
+After creating the base tables above, run [`supabase/migrations/20261128000000_daily_claim_limit.sql`](./supabase/migrations/20261128000000_daily_claim_limit.sql) in the Supabase SQL Editor. It adds an atomic claim RPC and a database trigger that prevents a fourth successful claim on the same UTC day, including concurrent claim attempts. The client-side limit is `DAILY_CLAIM_LIMIT` in `src/services/claims.ts`; keep the SQL trigger's limit in sync if you change it. Pending and completed (`verified_complete`) claims count; cancelled and expired claims do not.
+
 ### 3. Run the Development Server
 
 ```bash

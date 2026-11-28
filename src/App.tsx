@@ -86,6 +86,7 @@ export function App() {
 
   const [viewMode, setViewMode] = useState<'listings' | 'map'>('listings');
   const [isLocating, setIsLocating] = useState<boolean>(true);
+  const [claimError, setClaimError] = useState<string | null>(null);
   const [showLocationPicker, setShowLocationPicker] = useState<boolean>(false);
   const [customCityQuery, setCustomCityQuery] = useState<string>('');
   const accountAvatarLetter = (
@@ -181,9 +182,12 @@ export function App() {
   ).length;
 
   const handleRescueClaim = async (listingId: string) => {
+    setClaimError(null);
     const claim = await claimListing(listingId);
     if (claim) {
       setActiveTab('claims');
+    } else {
+      setClaimError(useEcoStore.getState().error);
     }
   };
 
@@ -404,6 +408,14 @@ export function App() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 pt-4 sm:pt-6">
+        {claimError && (
+          <p
+            role="alert"
+            className="mb-4 rounded-xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200"
+          >
+            {claimError}
+          </p>
+        )}
         {activeTab === 'browse' && (
           <div className="space-y-4">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-[#101B18]/85 border border-emerald-500/25 p-3 rounded-2xl backdrop-blur-xl">

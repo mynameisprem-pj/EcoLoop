@@ -17,13 +17,13 @@ import {
 } from '../utils/impactCalculator';
 import { SAVED_LOCATION_KEY } from '../utils/geoUtils';
 import type { Coordinates } from '../utils/geoUtils';
+import { DAILY_CLAIM_LIMIT, getTodayClaimCount } from '../services/claims';
 import {
   supabase,
   isCloudConfigured,
   mapRowToListing,
   mapListingToRow,
   mapRowToClaim,
-  mapClaimToRow,
   mapRowToProfile,
   mapProfileToRow,
   startEcoLoopRealtime,
@@ -656,6 +656,7 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
       return null;
     }
 
+    set({ error: null });
     const claimant =
       consumerName?.trim() ||
       currentUser.displayName ||
@@ -665,6 +666,13 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
     const pickupCode = generatePickupCode();
 
     try {
+      const todayClaimCount = await getTodayClaimCount(userId);
+      if (todayClaimCount >= DAILY_CLAIM_LIMIT) {
+        const message = `You have reached your daily claim limit of ${DAILY_CLAIM_LIMIT} items. Come back tomorrow!`;
+        set({ error: message });
+        return null;
+      }
+
       const target = get().listings.find((l) => l.id === listingId);
       if (!target || target.status !== 'available') {
         throw new Error('This listing has just been claimed by someone else.');
@@ -686,26 +694,16 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
       };
 
       if (supabase && isCloudConfigured) {
-        const { data: updatedRows, error: updateErr } = await supabase
-          .from('listings')
-          .update({
-            status: 'claimed',
-            claimed_by_id: userId,
-            claimed_by_name: claimant,
-            claimed_at: now,
-            pickup_code: pickupCode,
-          })
-          .eq('id', listingId)
-          .eq('status', 'available')
-          .select();
-
-        if (updateErr || !updatedRows || updatedRows.length === 0) {
-          throw new Error('Listing was just claimed by another user.');
-        }
-
-        const { error: claimErr } = await supabase
-          .from('claims')
-          .insert(mapClaimToRow(newClaim));
+        const { error: claimErr } = await supabase.rpc(
+          'claim_surplus_listing',
+          {
+            p_claim_id: newClaim.id,
+            p_listing_id: target.id,
+            p_receiver_id: userId,
+            p_receiver_name: claimant,
+            p_pickup_code: pickupCode,
+          }
+        );
         if (claimErr) throw new Error(claimErr.message);
       }
 
