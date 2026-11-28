@@ -1,4 +1,9 @@
-type FoodCategory = 'bakery' | 'produce' | 'prepared_meals' | 'dairy' | 'pantry';
+type FoodCategory =
+  | 'bakery'
+  | 'produce'
+  | 'prepared_meals'
+  | 'dairy'
+  | 'pantry';
 type DietaryTag =
   | 'vegan'
   | 'vegetarian'
@@ -35,72 +40,101 @@ interface VercelResponse {
   json(body: unknown): void;
 }
 
+declare const process: {
+  env: Record<string, string | undefined>;
+};
+
+const VALID_CATEGORIES: FoodCategory[] = [
+  'bakery',
+  'produce',
+  'prepared_meals',
+  'dairy',
+  'pantry',
+];
+
+const VALID_STORAGE: StorageRequirement[] = [
+  'ambient',
+  'refrigerated',
+  'frozen',
+];
+
+const VALID_DIETARY_TAGS: DietaryTag[] = [
+  'vegan',
+  'vegetarian',
+  'gluten_free',
+  'halal',
+  'nut_free',
+];
+
+const ALLOWED_MIME_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+]);
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+function normalizeBase64Payload(raw: string): string {
+  const trimmed = raw.trim();
+  const dataUrlMatch = /^data:[^;]+;base64,(.+)$/i.exec(trimmed);
+  return dataUrlMatch ? dataUrlMatch[1].trim() : trimmed;
+}
+
 function parseInspectionResponse(value: unknown): InspectionResponse | null {
   if (!isRecord(value)) return null;
-  const categories: FoodCategory[] = [
-    'bakery',
-    'produce',
-    'prepared_meals',
-    'dairy',
-    'pantry',
-  ];
-  const storageRequirements: StorageRequirement[] = [
-    'ambient',
-    'refrigerated',
-    'frozen',
-  ];
-  const dietaryTags: DietaryTag[] = [
-    'vegan',
-    'vegetarian',
-    'gluten_free',
-    'halal',
-    'nut_free',
-  ];
-  const fields = value as Record<string, unknown>;
+
+  const {
+    isEdibleFood,
+    safetyReason,
+    title,
+    description,
+    category,
+    storageRequirement,
+    dietaryTags,
+    detectedAllergens,
+    recommendedExpiryHours,
+    recommendedPickupWindow,
+  } = value;
 
   if (
-    typeof fields.isEdibleFood !== 'boolean' ||
-    typeof fields.safetyReason !== 'string' ||
-    typeof fields.title !== 'string' ||
-    typeof fields.description !== 'string' ||
-    typeof fields.category !== 'string' ||
-    !categories.includes(fields.category as FoodCategory) ||
-    typeof fields.storageRequirement !== 'string' ||
-    !storageRequirements.includes(
-      fields.storageRequirement as StorageRequirement
+    typeof isEdibleFood !== 'boolean' ||
+    typeof safetyReason !== 'string' ||
+    typeof title !== 'string' ||
+    typeof description !== 'string' ||
+    typeof category !== 'string' ||
+    !VALID_CATEGORIES.includes(category as FoodCategory) ||
+    typeof storageRequirement !== 'string' ||
+    !VALID_STORAGE.includes(storageRequirement as StorageRequirement) ||
+    !Array.isArray(dietaryTags) ||
+    !dietaryTags.every(
+      (tag) =>
+        typeof tag === 'string' && VALID_DIETARY_TAGS.includes(tag as DietaryTag)
     ) ||
-    !Array.isArray(fields.dietaryTags) ||
-    !fields.dietaryTags.every(
-      (tag) => typeof tag === 'string' && dietaryTags.includes(tag as DietaryTag)
-    ) ||
-    !Array.isArray(fields.detectedAllergens) ||
-    !fields.detectedAllergens.every(
-      (allergen) => typeof allergen === 'string'
-    ) ||
-    typeof fields.recommendedExpiryHours !== 'number' ||
-    !Number.isFinite(fields.recommendedExpiryHours) ||
-    fields.recommendedExpiryHours < 0.5 ||
-    fields.recommendedExpiryHours > 48 ||
-    typeof fields.recommendedPickupWindow !== 'string'
+    !Array.isArray(detectedAllergens) ||
+    !detectedAllergens.every((allergen) => typeof allergen === 'string') ||
+    typeof recommendedExpiryHours !== 'number' ||
+    !Number.isFinite(recommendedExpiryHours) ||
+    recommendedExpiryHours < 0.5 ||
+    recommendedExpiryHours > 48 ||
+    typeof recommendedPickupWindow !== 'string'
   ) {
     return null;
   }
 
   return {
-    isEdibleFood: fields.isEdibleFood,
-    safetyReason: fields.safetyReason,
-    title: fields.title,
-    description: fields.description,
-    category: fields.category as FoodCategory,
-    storageRequirement: fields.storageRequirement as StorageRequirement,
-    dietaryTags: fields.dietaryTags as DietaryTag[],
-    detectedAllergens: fields.detectedAllergens as string[],
-    recommendedExpiryHours: fields.recommendedExpiryHours,
-    recommendedPickupWindow: fields.recommendedPickupWindow,
+    isEdibleFood,
+    safetyReason,
+    title,
+    description,
+    category: category as FoodCategory,
+    storageRequirement: storageRequirement as StorageRequirement,
+    dietaryTags: dietaryTags as DietaryTag[],
+    detectedAllergens: detectedAllergens as string[],
+    recommendedExpiryHours,
+    recommendedPickupWindow,
   };
 }
 
@@ -109,13 +143,18 @@ function getImageInput(value: unknown): InspectionRequest | null {
   const { imageBase64, mimeType } = value;
   if (
     typeof imageBase64 !== 'string' ||
-    imageBase64.length === 0 ||
     typeof mimeType !== 'string' ||
-    !['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(mimeType)
+    !ALLOWED_MIME_TYPES.has(mimeType)
   ) {
     return null;
   }
-  return { imageBase64, mimeType };
+
+  const normalizedBase64 = normalizeBase64Payload(imageBase64);
+  if (normalizedBase64.length === 0) {
+    return null;
+  }
+
+  return { imageBase64: normalizedBase64, mimeType };
 }
 
 export default async function handler(
@@ -137,10 +176,13 @@ export default async function handler(
 
   const image = getImageInput(req.body);
   if (!image) {
-    res.status(400).json({ error: 'A valid imageBase64 and mimeType are required.' });
+    res
+      .status(400)
+      .json({ error: 'A valid imageBase64 and mimeType are required.' });
     return;
   }
 
+  const model = process.env.GEMINI_MODEL?.trim() || 'gemini-3.5-flash-lite';
   const prompt = [
     'Inspect this image for a surplus food listing.',
     'Set isEdibleFood to false for blank images, memes, non-food spam, or food that is visibly spoiled or inedible.',
@@ -152,7 +194,7 @@ export default async function handler(
   ].join(' ');
 
   const endpoint = new URL(
-    'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent'
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`
   );
 
   try {
@@ -177,8 +219,8 @@ export default async function handler(
           },
         ],
         generationConfig: {
-          responseMimeType: 'application/json',
-          responseSchema: {
+          response_mime_type: 'application/json',
+          response_schema: {
             type: 'OBJECT',
             properties: {
               isEdibleFood: { type: 'BOOLEAN' },
@@ -187,23 +229,17 @@ export default async function handler(
               description: { type: 'STRING' },
               category: {
                 type: 'STRING',
-                enum: ['bakery', 'produce', 'prepared_meals', 'dairy', 'pantry'],
+                enum: VALID_CATEGORIES,
               },
               storageRequirement: {
                 type: 'STRING',
-                enum: ['ambient', 'refrigerated', 'frozen'],
+                enum: VALID_STORAGE,
               },
               dietaryTags: {
                 type: 'ARRAY',
                 items: {
                   type: 'STRING',
-                  enum: [
-                    'vegan',
-                    'vegetarian',
-                    'gluten_free',
-                    'halal',
-                    'nut_free',
-                  ],
+                  enum: VALID_DIETARY_TAGS,
                 },
               },
               detectedAllergens: {
@@ -231,11 +267,16 @@ export default async function handler(
     });
 
     if (!geminiResponse.ok) {
+      const errorText = await geminiResponse.text().catch(() => '');
       console.error(
-        'Gemini food inspection failed with status:',
-        geminiResponse.status
+        'Gemini food inspection failed:',
+        geminiResponse.status,
+        errorText.slice(0, 500)
       );
-      res.status(502).json({ error: 'Food inspection provider request failed.' });
+      res.status(502).json({
+        error: 'Food inspection provider request failed.',
+        upstreamStatus: geminiResponse.status,
+      });
       return;
     }
 
@@ -250,15 +291,18 @@ export default async function handler(
       res.status(502).json({ error: 'Food inspection returned no result.' });
       return;
     }
+
     const parts = candidate.content.parts;
     if (!Array.isArray(parts)) {
       res.status(502).json({ error: 'Food inspection returned no result.' });
       return;
     }
+
     const text = parts.find(
       (part): part is Record<string, unknown> =>
         isRecord(part) && typeof part.text === 'string'
     )?.text;
+
     if (typeof text !== 'string') {
       res.status(502).json({ error: 'Food inspection returned no result.' });
       return;
@@ -268,12 +312,14 @@ export default async function handler(
     try {
       parsed = JSON.parse(text);
     } catch {
+      console.error('Gemini returned non-JSON text:', text.slice(0, 300));
       res.status(502).json({ error: 'Food inspection returned invalid JSON.' });
       return;
     }
 
     const result = parseInspectionResponse(parsed);
     if (!result) {
+      console.error('Gemini JSON failed schema validation:', parsed);
       res.status(502).json({ error: 'Food inspection returned invalid fields.' });
       return;
     }
