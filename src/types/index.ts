@@ -22,6 +22,20 @@ export type DietaryTag =
   | 'halal'
   | 'nut_free';
 
+export interface FoodInspectionResult {
+  isEdibleFood: boolean;
+  safetyReason: string;
+  title: string;
+  description: string;
+  category: FoodCategory;
+  storageRequirement: 'ambient' | 'refrigerated' | 'frozen';
+  dietaryTags: DietaryTag[];
+  detectedAllergens: string[];
+  recommendedExpiryHours: number;
+  recommendedPickupWindow: string;
+  source: 'ai' | 'fallback';
+}
+
 export type AuthProviderMode = 'supabase' | 'guest';
 
 export interface AccountProfile {

@@ -1,5 +1,5 @@
 // src/components/dashboard/PostListingForm.tsx
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   PlusCircle,
   Leaf,
@@ -14,9 +14,15 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useEcoStore } from '../../store/useEcoStore';
-import type { FoodCategory, DietaryTag, DonorProfile } from '../../types';
+import type {
+  FoodCategory,
+  DietaryTag,
+  DonorProfile,
+  FoodInspectionResult,
+} from '../../types';
 import { calculateListingImpact } from '../../db/database';
 import { compressFoodImage } from '../../utils/imageUtils';
+import { inspectFoodImage } from '../../services/foodInspector';
 import {
   type Coordinates,
   requestBrowserGps,
@@ -67,6 +73,10 @@ export const PostListingForm: React.FC = () => {
   const [selectedTags, setSelectedTags] = useState<DietaryTag[]>([]);
   const [imageUrl, setImageUrl] = useState<string | undefined>(undefined);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [isInspectingFood, setIsInspectingFood] = useState(false);
+  const [foodInspection, setFoodInspection] =
+    useState<FoodInspectionResult | null>(null);
+  const inspectionRequestId = useRef(0);
 
   // Real Location State for the Store
   const [coordsOverride, setCoordsOverride] = useState<Coordinates | null>(null);
@@ -86,18 +96,42 @@ export const PostListingForm: React.FC = () => {
   const handlePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    const requestId = ++inspectionRequestId.current;
     setIsUploadingImage(true);
+    setIsInspectingFood(false);
+    setFoodInspection(null);
     setFormError(null);
     try {
       const compressed = await compressFoodImage(file);
       setImageUrl(compressed);
+      setIsInspectingFood(true);
+      const result = await inspectFoodImage(compressed);
+      if (requestId !== inspectionRequestId.current) return;
+      setFoodInspection(result);
+      setTitle(result.title);
+      setDescription(result.description);
+      setCategory(result.category);
+      setStorageRequirement(result.storageRequirement);
+      setSelectedTags(result.dietaryTags);
+      setExpiryInput(String(result.recommendedExpiryHours));
+      setPickupWindow(result.recommendedPickupWindow);
     } catch (err) {
       setFormError(
         err instanceof Error ? err.message : 'Failed to process photo'
       );
     } finally {
-      setIsUploadingImage(false);
+      if (requestId === inspectionRequestId.current) {
+        setIsUploadingImage(false);
+        setIsInspectingFood(false);
+      }
     }
+  };
+
+  const handleRemovePhoto = () => {
+    inspectionRequestId.current += 1;
+    setImageUrl(undefined);
+    setFoodInspection(null);
+    setIsInspectingFood(false);
   };
 
   const previewWeight = Math.min(50, Math.max(0, parseFloat(weightInput) || 0));
@@ -152,6 +186,17 @@ export const PostListingForm: React.FC = () => {
     e.preventDefault();
     setFormError(null);
 
+    if (isUploadingImage || isInspectingFood) {
+      setFormError('Please wait for the food photo inspection to finish.');
+      return;
+    }
+    if (foodInspection?.isEdibleFood === false) {
+      setFormError(
+        foodInspection.safetyReason ||
+          'This image does not appear to show edible surplus food.'
+      );
+      return;
+    }
     if (!donorName.trim()) {
       setFormError('Please enter your store or organization name.');
       return;
@@ -336,12 +381,17 @@ export const PostListingForm: React.FC = () => {
               />
               <button
                 type="button"
-                onClick={() => setImageUrl(undefined)}
+                onClick={handleRemovePhoto}
                 className="absolute top-1.5 right-1.5 p-1.5 rounded-full bg-black/75 text-rose-400 hover:text-rose-300 cursor-pointer"
                 title="Remove photo"
               >
                 <Trash2 className="w-4 h-4" />
               </button>
+              {isInspectingFood && (
+                <p className="absolute bottom-0 inset-x-0 bg-black/75 px-2 py-1 text-[10px] text-emerald-200">
+                  Inspecting food photo...
+                </p>
+              )}
             </div>
           ) : (
             <label className="flex items-center justify-center gap-2 w-full py-3 px-4 rounded-xl bg-black/35 hover:bg-black/50 border border-dashed border-emerald-500/40 text-xs font-semibold text-emerald-300 cursor-pointer transition-colors">
@@ -359,6 +409,31 @@ export const PostListingForm: React.FC = () => {
                 className="hidden"
               />
             </label>
+          )}
+          {foodInspection && !isInspectingFood && (
+            <div
+              className={`mt-2 rounded-lg border p-2.5 text-xs ${
+                foodInspection.isEdibleFood
+                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100'
+                  : 'border-rose-500/40 bg-rose-500/10 text-rose-100'
+              }`}
+              role="status"
+            >
+              <p className="font-semibold">
+                {foodInspection.source === 'ai'
+                  ? 'AI food inspection'
+                  : 'Manual food check required'}
+              </p>
+              <p className="mt-1">{foodInspection.safetyReason}</p>
+              <p className="mt-1">
+                Recommended pickup: {foodInspection.recommendedPickupWindow}
+              </p>
+              {foodInspection.detectedAllergens.length > 0 && (
+                <p className="mt-1">
+                  Detected allergens: {foodInspection.detectedAllergens.join(', ')}
+                </p>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -540,9 +615,15 @@ export const PostListingForm: React.FC = () => {
 
       <button
         type="submit"
+        disabled={
+          isUploadingImage ||
+          isInspectingFood ||
+          foodInspection?.isEdibleFood === false
+        }
         className="w-full py-3.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 text-slate-950 font-extrabold text-sm tracking-wide uppercase shadow-[0_0_20px_rgba(16,185,129,0.35)] hover:brightness-110 flex items-center justify-center gap-2 transition-all cursor-pointer"
       >
-        <PlusCircle className="w-4 h-4" /> Publish Live Listing
+        <PlusCircle className="w-4 h-4" />
+        {isInspectingFood ? 'Inspecting Food Photo...' : 'Publish Live Listing'}
       </button>
     </form>
   );
