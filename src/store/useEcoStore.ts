@@ -53,7 +53,7 @@ export interface NewListingInput {
   address: string;
   neighborhood: string;
   coordinates: Coordinates;
-  imageUrl?: string;
+  imageUrl: string;
 }
 
 function getOrCreateDeviceUserId(): string {
@@ -562,6 +562,12 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
   resetFilters: () => set({ filters: DEFAULT_FILTERS }),
 
   addListing: async (input: NewListingInput) => {
+    if (!input.imageUrl?.trim()) {
+      const message = 'A food photo is required before publishing a surplus listing.';
+      set({ error: message });
+      throw new Error(message);
+    }
+
     const { userId: storedUserId, currentUser } = get();
     const userId = currentUser?.id || storedUserId;
 

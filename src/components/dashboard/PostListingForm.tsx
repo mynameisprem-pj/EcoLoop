@@ -77,6 +77,7 @@ export const PostListingForm: React.FC = () => {
   const [foodInspection, setFoodInspection] =
     useState<FoodInspectionResult | null>(null);
   const inspectionRequestId = useRef(0);
+  const photoInputRef = useRef<HTMLInputElement>(null);
 
   // Real Location State for the Store
   const [coordsOverride, setCoordsOverride] = useState<Coordinates | null>(null);
@@ -92,17 +93,22 @@ export const PostListingForm: React.FC = () => {
   const [addressSearchQuery, setAddressSearchQuery] = useState('');
   const [isLocating, setIsLocating] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [photoError, setPhotoError] = useState<string | null>(null);
 
   const handlePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
     const requestId = ++inspectionRequestId.current;
     setIsUploadingImage(true);
     setIsInspectingFood(false);
+    setImageUrl(undefined);
     setFoodInspection(null);
+    setPhotoError(null);
     setFormError(null);
     try {
       const compressed = await compressFoodImage(file);
+      if (requestId !== inspectionRequestId.current) return;
       setImageUrl(compressed);
       setIsInspectingFood(true);
       const result = await inspectFoodImage(compressed);
@@ -132,6 +138,7 @@ export const PostListingForm: React.FC = () => {
     setImageUrl(undefined);
     setFoodInspection(null);
     setIsInspectingFood(false);
+    setPhotoError(null);
   };
 
   const previewWeight = Math.min(50, Math.max(0, parseFloat(weightInput) || 0));
@@ -188,6 +195,10 @@ export const PostListingForm: React.FC = () => {
 
     if (isUploadingImage || isInspectingFood) {
       setFormError('Please wait for the food photo inspection to finish.');
+      return;
+    }
+    if (!imageUrl?.trim()) {
+      setPhotoError('Upload or capture a food photo before publishing this listing.');
       return;
     }
     if (foodInspection?.isEdibleFood === false) {
@@ -370,45 +381,72 @@ export const PostListingForm: React.FC = () => {
         {/* Real Food Photo Capture / Upload */}
         <div>
           <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-            Food Photo (Camera or Upload)
+            Food Photo (Camera or Upload) *
           </label>
+          <p className="mb-2 text-xs text-slate-400">
+            A photo of the surplus food is required for every listing.
+          </p>
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={handlePhotoChange}
+            className="hidden"
+          />
           {imageUrl ? (
-            <div className="relative w-36 h-36 rounded-xl overflow-hidden border border-emerald-400/50 shadow-md">
-              <img
-                src={imageUrl}
-                alt="Surplus food preview"
-                className="w-full h-full object-cover"
-              />
-              <button
-                type="button"
-                onClick={handleRemovePhoto}
-                className="absolute top-1.5 right-1.5 p-1.5 rounded-full bg-black/75 text-rose-400 hover:text-rose-300 cursor-pointer"
-                title="Remove photo"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-              {isInspectingFood && (
-                <p className="absolute bottom-0 inset-x-0 bg-black/75 px-2 py-1 text-[10px] text-emerald-200">
-                  Inspecting food photo...
-                </p>
-              )}
+            <div className="flex flex-wrap items-start gap-3">
+              <div className="relative h-36 w-36 shrink-0 overflow-hidden rounded-xl border border-emerald-400/50 shadow-md">
+                <img
+                  src={imageUrl}
+                  alt="Surplus food preview"
+                  className="h-full w-full object-cover"
+                />
+                {isInspectingFood && (
+                  <p className="absolute inset-x-0 bottom-0 bg-black/75 px-2 py-1 text-[10px] text-emerald-200">
+                    Inspecting food photo...
+                  </p>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => photoInputRef.current?.click()}
+                  disabled={isUploadingImage || isInspectingFood}
+                  className="rounded-lg border border-emerald-500/40 px-3 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/10 disabled:opacity-50"
+                >
+                  Replace Photo
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRemovePhoto}
+                  className="flex items-center gap-1.5 rounded-lg border border-rose-500/40 px-3 py-2 text-xs font-semibold text-rose-200 hover:bg-rose-500/10"
+                  title="Remove photo"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Remove Photo
+                </button>
+              </div>
             </div>
           ) : (
-            <label className="flex items-center justify-center gap-2 w-full py-3 px-4 rounded-xl bg-black/35 hover:bg-black/50 border border-dashed border-emerald-500/40 text-xs font-semibold text-emerald-300 cursor-pointer transition-colors">
+            <button
+              type="button"
+              onClick={() => photoInputRef.current?.click()}
+              disabled={isUploadingImage}
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-emerald-500/40 bg-black/35 px-4 py-3 text-xs font-semibold text-emerald-300 transition-colors hover:bg-black/50 disabled:opacity-50"
+            >
               <Camera className="w-4 h-4 text-emerald-400" />
               <span>
                 {isUploadingImage
                   ? 'Compressing photo...'
                   : 'Take Photo or Upload Image'}
               </span>
-              <input
-                type="file"
-                accept="image/*"
-                capture="environment"
-                onChange={handlePhotoChange}
-                className="hidden"
-              />
-            </label>
+            </button>
+          )}
+          {photoError && (
+            <p className="mt-2 text-xs text-rose-200" role="alert">
+              {photoError}
+            </p>
           )}
           {foodInspection && !isInspectingFood && (
             <div
@@ -425,6 +463,11 @@ export const PostListingForm: React.FC = () => {
                   : 'Manual food check required'}
               </p>
               <p className="mt-1">{foodInspection.safetyReason}</p>
+              {!foodInspection.isEdibleFood && (
+                <p className="mt-1 font-semibold">
+                  Replace this photo with one showing edible surplus food before publishing.
+                </p>
+              )}
               <p className="mt-1">
                 Recommended pickup: {foodInspection.recommendedPickupWindow}
               </p>
@@ -604,7 +647,7 @@ export const PostListingForm: React.FC = () => {
       </div>
 
       {/* Calculated Impact Summary Footer */}
-      <div className="flex items-center justify-between p-3 rounded-xl bg-emerald-950/40 border border-emerald-500/25 text-xs">
+      <div className="flex flex-col items-start gap-2 rounded-xl border border-emerald-500/25 bg-emerald-950/40 p-3 text-xs sm:flex-row sm:items-center sm:justify-between">
         <span className="flex items-center gap-1.5 text-emerald-300 font-semibold">
           <Leaf className="w-4 h-4" /> Estimated Impact: {co2SavedKg} kg CO₂e prevented
         </span>
