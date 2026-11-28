@@ -88,6 +88,13 @@ export function App() {
   const [isLocating, setIsLocating] = useState<boolean>(true);
   const [showLocationPicker, setShowLocationPicker] = useState<boolean>(false);
   const [customCityQuery, setCustomCityQuery] = useState<string>('');
+  const accountAvatarLetter = (
+    currentUser?.displayName.trim() ||
+    currentUser?.email ||
+    'U'
+  )
+    .charAt(0)
+    .toUpperCase();
 
   const detectLiveGpsLocation = useCallback(async () => {
     try {
@@ -380,7 +387,13 @@ export function App() {
               className="inline-flex items-center gap-1 px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-[11px] sm:text-xs font-semibold text-white cursor-pointer shrink-0"
               title={currentUser ? currentUser.displayName : 'Sign In'}
             >
-              <UserCheck className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-emerald-400 shrink-0" />
+              {currentUser?.authMode === 'supabase' ? (
+                <span className="inline-flex w-5 h-5 sm:w-6 sm:h-6 items-center justify-center rounded-full bg-emerald-500/20 border border-emerald-400/40 text-[10px] sm:text-xs font-extrabold text-emerald-200 shrink-0">
+                  {accountAvatarLetter}
+                </span>
+              ) : (
+                <UserCheck className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-emerald-400 shrink-0" />
+              )}
               <span className="hidden md:inline">
                 {currentUser ? currentUser.displayName.split(' ')[0] : 'Sign In'}
               </span>

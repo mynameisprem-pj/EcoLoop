@@ -22,7 +22,7 @@ export type DietaryTag =
   | 'halal'
   | 'nut_free';
 
-export type AuthProviderMode = 'supabase' | 'demo';
+export type AuthProviderMode = 'supabase' | 'guest';
 
 export interface AccountProfile {
   id: string;

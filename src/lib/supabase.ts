@@ -151,7 +151,7 @@ export function startEcoLoopRealtime(
 
 export function mapRowToProfile(
   row: Record<string, any>,
-  authMode: 'supabase' | 'demo' = 'supabase'
+  authMode: 'supabase' | 'guest' = 'supabase'
 ): AccountProfile {
   const verifiedStore = Boolean(row.verified_store);
   return {

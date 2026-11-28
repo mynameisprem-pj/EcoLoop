@@ -75,6 +75,9 @@ export const AuthModal: React.FC = () => {
               >
                 <Sparkles className="w-3.5 h-3.5" /> Judge Demo Access
               </button>
+              <p className="mt-2 text-center text-[10px] text-emerald-200/70">
+                Guest identity is saved only in this browser.
+              </p>
             </div>
           </div>
         ) : (

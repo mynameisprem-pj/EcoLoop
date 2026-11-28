@@ -66,9 +66,27 @@ function getOrCreateDeviceUserId(): string {
   return existing;
 }
 
+function getOrCreateGuestUserId(): string {
+  const storageKey = 'ecoloop_guest_user_id';
+  let existing = localStorage.getItem(storageKey);
+  if (!existing) {
+    existing = `guest-${crypto.randomUUID()}`;
+    localStorage.setItem(storageKey, existing);
+  }
+  return existing;
+}
+
+const OWN_LISTING_IDS_KEY = 'ecoloop_own_listing_ids';
+
+function getOwnListingIds(): string[] {
+  const stored = localStorage.getItem(OWN_LISTING_IDS_KEY);
+  return stored ? stored.split('\n').filter(Boolean) : [];
+}
+
 interface EcoStoreState {
   listings: SurplusListing[];
   claims: ClaimRecord[];
+  ownListingIds: string[];
   verifiedDonorIds: string[];
   impact: ImpactMetrics;
   isInitialized: boolean;
@@ -139,6 +157,7 @@ const DEFAULT_FILTERS: FilterState = {
 };
 
 let authListenerAttached = false;
+let ownListingStorageListenerAttached = false;
 let refreshSequence = 0;
 
 async function hydrateProfileFromCloud(
@@ -146,7 +165,7 @@ async function hydrateProfileFromCloud(
   email: string,
   fallbackName: string,
   role: UserRole,
-  authMode: 'supabase' | 'demo',
+  authMode: 'supabase' | 'guest',
   defaultVerified: boolean,
   set: (partial: Partial<EcoStoreState>) => void,
   refreshData: () => Promise<void>
@@ -193,6 +212,7 @@ async function hydrateProfileFromCloud(
 export const useEcoStore = create<EcoStoreState>((set, get) => ({
   listings: [],
   claims: [],
+  ownListingIds: getOwnListingIds(),
   verifiedDonorIds: ['demo-judge-01'],
   impact: {
     totalWeightKg: 0,
@@ -228,6 +248,15 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
     set({ isLoading: true, error: null });
 
     try {
+      if (!ownListingStorageListenerAttached) {
+        window.addEventListener('storage', (event) => {
+          if (event.key === OWN_LISTING_IDS_KEY) {
+            set({ ownListingIds: getOwnListingIds() });
+          }
+        });
+        ownListingStorageListenerAttached = true;
+      }
+
       await get().refreshData();
       await get().sweepExpiredListings();
 
@@ -465,12 +494,13 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
   },
 
   signInAsDemo: async () => {
+    const guestId = getOrCreateGuestUserId();
     await hydrateProfileFromCloud(
-      'demo-judge-01',
+      guestId,
       'demo-judge@ecoloop.app',
       'Judge Demo',
       get().activeRole,
-      'demo',
+      'guest',
       true,
       set,
       get().refreshData
@@ -577,6 +607,11 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
     }
 
     await db.listings.put(newListing);
+    const ownListingIds = Array.from(
+      new Set([...getOwnListingIds(), newListing.id])
+    );
+    localStorage.setItem(OWN_LISTING_IDS_KEY, ownListingIds.join('\n'));
+    set({ ownListingIds });
     await get().refreshData();
     set({ activeTab: 'browse', error: null });
     return newListing;
@@ -590,6 +625,12 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
       currentUser,
     } = get();
     const userId = currentUser?.id || storedUserId;
+
+    if (getOwnListingIds().includes(listingId)) {
+      const message = 'You cannot claim a listing published from this browser.';
+      set({ error: message });
+      return null;
+    }
 
     if (!currentUser) {
       get().setAuthModalOpen(true, () => {
@@ -615,10 +656,6 @@ export const useEcoStore = create<EcoStoreState>((set, get) => ({
       const target = get().listings.find((l) => l.id === listingId);
       if (!target || target.status !== 'available') {
         throw new Error('This listing has just been claimed by someone else.');
-      }
-
-      if (target.donorId === userId) {
-        throw new Error('You cannot claim your own store listing.');
       }
 
       const newClaim: ClaimRecord = {
